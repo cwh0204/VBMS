@@ -1,0 +1,55 @@
+## ==========================================
+## Visual Studio / C# / WPF 표준 .gitignore
+## ==========================================
+
+# 1. 빌드 결과물 및 임시 파일 (핵심!)
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+x64/
+x86/
+[A-a][Rr][Mm]/
+[A-a][Rr][Mm]64/
+[D-d]ebug/
+[R-r]elease/
+
+# 2. Visual Studio 개인 설정 및 캐시 파일
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+*.vsp
+*.vspx
+*.sap
+
+# 3. NuGet 패키지 및 관련 캐시
+*.nupkg
+packages/
+!packages/build/
+*.nuget.props
+*.nuget.targets
+
+# 4. 테스트 결과 및 가상화/게시 결과물
+TestResults/
+[Pp]ublish/
+
+# 5. JetBrains (Rider, ReSharper 사용 시)
+_ReSharper*/
+*.DotSettings.user
+
+# 6. VS Code 설정 파일 (개인 설정 제외)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# 7. OS 생성 임시 파일
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
