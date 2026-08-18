@@ -1,5 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
@@ -16,19 +18,27 @@ namespace VBMS.ViewModels
         private RackViewModel _rack;
 
         [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(HasSelectedCell))] // ⭐ SelectedCell 변경 시 HasSelectedCell 갱신 통지
         private CellViewModel? _selectedCell;
 
-        [ObservableProperty]
-        private int _totalCellCount;
+        // ⭐ XAML의 IsEnabled="{Binding HasSelectedCell}" 바인딩용
+        public bool HasSelectedCell => SelectedCell != null;
 
-        [ObservableProperty]
-        private int _normalCount;
+        // ⭐ XAML의 ItemsSource="{Binding SimplifiedBayLabels}" 바인딩용
+        public IEnumerable<string>? SimplifiedBayLabels => Rack?.SimplifiedBayLabels;
 
-        [ObservableProperty]
-        private int _warningCount;
+        // XAML 호환용 래퍼
+        public RackViewModel ParentRack => Rack;
 
-        [ObservableProperty]
-        private int _fireCount;
+        // 셀 상태 요약 바인딩 프로퍼티
+        [ObservableProperty] private int _totalCellCount;
+        [ObservableProperty] private int _totalCount;
+        [ObservableProperty] private int _normalCount;
+        [ObservableProperty] private int _commErrorCount;
+        [ObservableProperty] private int _smokeCount;
+        [ObservableProperty] private int _warningCount;
+        [ObservableProperty] private int _fireCount;
+        [ObservableProperty] private int _disabledCount;
 
         public RackDetailViewModel(RackViewModel rack, IFireVerificationService fireVerificationService)
         {
@@ -39,28 +49,48 @@ namespace VBMS.ViewModels
             RefreshCounts();
         }
 
+        /// <summary>
+        /// CellList의 색상을 분석하여 요약 개수를 계산합니다.
+        /// </summary>
         public void RefreshCounts()
         {
-            if (Rack?.CellList == null) return;
+            if (Rack?.CellList == null || Rack.CellList.Count == 0) return;
 
-            TotalCellCount = Rack.CellList.Count;
-            NormalCount = Rack.CellList.Count(c => c.CellColor == "#4CAF50");
-            WarningCount = Rack.CellList.Count(c => c.CellColor == "#FF9800");
-            FireCount = Rack.CellList.Count(c => c.CellColor == "#F44336");
+            int total = Rack.CellList.Count;
+            TotalCellCount = total;
+            TotalCount = total;
+
+            // 정상 (#4CAF50)
+            NormalCount = Rack.CellList.Count(c =>
+                string.Equals(c.CellColor, "#4CAF50", StringComparison.OrdinalIgnoreCase));
+
+            // 통신오류/미연결 (회색 #9E9E9E, 노랑 #FFC107)
+            CommErrorCount = Rack.CellList.Count(c =>
+                string.Equals(c.CellColor, "#9E9E9E", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.CellColor, "#FFC107", StringComparison.OrdinalIgnoreCase));
+
+            // 연기감지 (#FF9800)
+            SmokeCount = Rack.CellList.Count(c =>
+                string.Equals(c.CellColor, "#FF9800", StringComparison.OrdinalIgnoreCase));
+            WarningCount = SmokeCount;
+
+            // 화재발생 (#F44336)
+            FireCount = Rack.CellList.Count(c =>
+                string.Equals(c.CellColor, "#F44336", StringComparison.OrdinalIgnoreCase));
+
+            // 사용중지 (#607D8B)
+            DisabledCount = Rack.CellList.Count(c =>
+                string.Equals(c.CellColor, "#607D8B", StringComparison.OrdinalIgnoreCase));
         }
+
+        public void UpdateSummaryCounts() => RefreshCounts();
 
         [RelayCommand]
         private async Task ResetSelectedCellSensorAsync(CellViewModel? targetCell)
         {
             var cellToReset = targetCell ?? SelectedCell;
+            if (cellToReset == null) return;
 
-            // 1. 셀 선택 여부 확인
-            if (cellToReset == null)
-            {
-                return;
-            }
-
-            // 3. 서비스 호출 결과 확인
             bool success = await _fireVerificationService.ManualResetAsync(
                 cellToReset.DetectorKey,
                 cellToReset.BoardId.ToString(),
@@ -72,9 +102,6 @@ namespace VBMS.ViewModels
             {
                 cellToReset.ResetSensor();
                 RefreshCounts();
-            }
-            else
-            {
             }
         }
     }

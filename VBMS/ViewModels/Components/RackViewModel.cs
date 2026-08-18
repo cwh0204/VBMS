@@ -53,6 +53,12 @@ namespace VBMS.ViewModels
         public ObservableCollection<string> BayLabels { get; } = new();
         public ObservableCollection<string> LevelLabels { get; } = new();
 
+        // ⭐ XAML 및 RackDetailViewModel 연동을 위한 간소화된 연(Bay) 라벨 목록
+        public IEnumerable<string> SimplifiedBayLabels =>
+            GridColumns > 0
+                ? Enumerable.Range(1, GridColumns).Select(i => $"{i}연")
+                : Enumerable.Empty<string>();
+
         public RackViewModel(string name, int columns, int rows, double temp)
             : this(name, columns, rows, temp, null)
         {
@@ -161,6 +167,9 @@ namespace VBMS.ViewModels
             {
                 LevelLabels.Add($"{level:00}단");
             }
+
+            // GridColumns가 변경되었음을 UI에 통지
+            OnPropertyChanged(nameof(SimplifiedBayLabels));
         }
 
         /// <summary>
