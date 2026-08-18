@@ -46,7 +46,7 @@ namespace VBMS.ViewModels
         public ObservableCollection<RackViewModel> RackList { get; } = new();
         public ObservableCollection<EventLogModel> EventLogList { get; } = new();
 
-        // ⭐ 외부 라이브러리 대신 화면에 띄울 커스텀 알람 팝업 목록
+        // 커스텀 알람 팝업 목록
         public ObservableCollection<FireAlarmPopupViewModel> ActiveAlarms { get; } = new();
 
         public MainWindowViewModel()
@@ -60,18 +60,17 @@ namespace VBMS.ViewModels
         public MainWindowViewModel(
             IFdsDataOrchestrator orchestrator,
             IFdsMappingService mappingService,
-            IFireSignalEvaluator fireSignalEvaluator) : this() // ⭐ INotificationManager 제거
+            IFireSignalEvaluator fireSignalEvaluator) : this()
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
             _fireSignalEvaluator = fireSignalEvaluator ?? throw new ArgumentNullException(nameof(fireSignalEvaluator));
 
-            // 패킷 처리 완료 이벤트 구독 (위치 기반 이벤트 로그 및 UI 업데이트 처리)
+            // 패킷 처리 완료 이벤트 구독
             _orchestrator.OnPacketProcessed += HandlePacketProcessed;
 
             _orchestrator.OnLogMessage += (message, level) =>
             {
-                Debug.WriteLine($"[{level}] {message}");
             };
 
             _ = Task.Run(async () =>
@@ -82,7 +81,6 @@ namespace VBMS.ViewModels
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[ERR] 서버 자동 시작 실패: {ex.Message}");
                     AddEventLog(0, 0, 0, $"[서버 오류] 서버 자동 시작 실패: {ex.Message}");
                 }
             });
@@ -132,78 +130,25 @@ namespace VBMS.ViewModels
                     targetRack.ResizeIfNeeded(targetBay, targetLevel);
                     targetRack.Temperature = packet.ModuleTemp;
 
-                    bool hasAnyFire = false; // 해당 랙 내 화재/경보 감지 여부 플래그
+                    // 1. RackViewModel로 셀 UI 색상/상태 업데이트 위임
+                    bool hasAnyFire = targetRack.UpdateDetectorCells(bayOffset, packet.Detectors, _fireSignalEvaluator);
 
+                    // 2. 이벤트 로그 기록 및 알람 팝업 발생 처리
                     foreach (var detector in packet.Detectors)
                     {
                         int globalBay = detector.Bay + bayOffset;
                         int globalLevel = detector.Level;
 
-                        var cell = targetRack.CellList.FirstOrDefault(c => c.Bay == globalBay && c.Level == globalLevel);
-                        if (cell == null) continue;
-
-                        // 1. FireSignalEvaluator를 이용한 상태 평가
-                        // 2: 온도감지(고온/화재), 1: 연기감지, 0: 정상
                         byte fireStatus = _fireSignalEvaluator?.Evaluate(detector.Status, detector.Temperature) ?? 0;
 
-                        // 랙 단위 화재 플래그 검사 (온도 또는 연기 화재 발생 시)
-                        if (fireStatus == 1 || fireStatus == 2)
-                        {
-                            hasAnyFire = true;
-                        }
-
-                        // 2. 셀 색상 업데이트
-                        if (detector.Status == 3)
-                        {
-                            cell.CellColor = "#FFC107"; // 통신/연결 오류 (노랑)
-                        }
-                        else if (fireStatus == 2)
-                        {
-                            cell.CellColor = "#F44336"; // 온도 화재 (빨강)
-                        }
-                        else if (fireStatus == 1)
-                        {
-                            cell.CellColor = "#FF9800"; // 연기 감지 (주황)
-                        }
-                        else if (detector.Status == 0 && fireStatus == 0)
-                        {
-                            cell.CellColor = "#4CAF50"; // 정상 (초록)
-                        }
-                        else
-                        {
-                            cell.CellColor = "#9E9E9E"; // 미연결 (회색)
-                        }
-
-                        // 3. 툴팁 텍스트 세분화
-                        string statusDisplayText = detector.Status switch
-                        {
-                            3 => "통신오류",
-                            0 => fireStatus switch
-                            {
-                                2 => "화재(온도)",
-                                1 => "화재(연기)",
-                                _ => "정상"
-                            },
-                            _ => fireStatus switch
-                            {
-                                2 => "화재(온도)",
-                                1 => "화재(연기)",
-                                _ => "미연결"
-                            }
-                        };
-
-                        cell.CellTooltip = $"[ 위치: {cell.Bay}연 {cell.Level}단 ]\n• 센서 ID: #{detector.Index}\n• 상태: {statusDisplayText}\n• 온도: {detector.Temperature}℃";
-
-                        // 4. 평가 결과를 전달하여 이벤트 로그 및 직접 작성한 팝업 알람 발생 처리
                         ProcessDetectorEventLog(packet.Id, detector, lane, globalBay, globalLevel, fireStatus, targetRack.RackName);
                     }
 
-                    // 5. 랙 카드 테두리 색상/두께 업데이트 (화재 유무 반영)
+                    // 3. 랙 카드 테두리 경보 색상 반영
                     targetRack.SetFireAlarmState(hasAnyFire);
                 }
             });
         }
-
 
         /// <summary>
         /// FireSignalEvaluator의 평가 결과(fireStatus)를 받아 상태 변화 시에만 로그 및 알람 팝업을 발생시킵니다.
@@ -240,15 +185,15 @@ namespace VBMS.ViewModels
                     case 2: // 온도 화재
                         AddEventLog(lane, bay, level, $"[화재 감지] 고온 경보 발생! (센서 #{detector.Index}, 온도: {detector.Temperature}℃)");
 
-                        // ⭐ 직접 제작한 팝업 알람 출력
-                        ShowFireNotification("🚨 화재 발생", $"[ {rackName} ]\n열 : {bay}  연 : {bay}  단 : {level}\n온도 : {detector.Temperature}℃");
+                        // ⭐ lane 변수로 정상 표기되도록 수정
+                        ShowFireNotification("🚨 화재 발생", $"[ {rackName} ]\n열 : {lane}  연 : {bay}  단 : {level}\n온도 : {detector.Temperature}℃");
                         break;
 
                     case 1: // 연기 화재
                         AddEventLog(lane, bay, level, $"[연기 감지] 연기 신호 감지 (센서 #{detector.Index})");
 
-                        // ⭐ 직접 제작한 팝업 알람 출력
-                        ShowFireNotification("⚠️ 연기 감지", $"[ {rackName} ]\n열 : {bay}  연 : {bay}  단 : {level}");
+                        // ⭐ lane 변수로 정상 표기되도록 수정
+                        ShowFireNotification("⚠️ 연기 감지", $"[ {rackName} ]\n열 : {lane}  연 : {bay}  단 : {level}");
                         break;
 
                     case 3: // 통신 오류
@@ -265,11 +210,8 @@ namespace VBMS.ViewModels
             }
         }
 
-
-
         /// <summary>
         /// 순수 WPF 기반 화재 알람 팝업 출력 메서드
-        /// (사용자가 [확인] 또는 [X] 버튼을 직접 누를 때까지 화면에 계속 남아있습니다)
         /// </summary>
         private void ShowFireNotification(string title, string message)
         {
@@ -277,7 +219,6 @@ namespace VBMS.ViewModels
             {
                 FireAlarmPopupViewModel? popupVm = null;
 
-                // [확인] 또는 [X] 버튼을 누를 때만 목록에서 제거
                 popupVm = new FireAlarmPopupViewModel(title, message, () =>
                 {
                     if (popupVm != null)
@@ -286,7 +227,6 @@ namespace VBMS.ViewModels
                     }
                 });
 
-                // 화면 오버레이 목록에 추가 (자동 삭제 타이머 제거)
                 ActiveAlarms.Add(popupVm);
             });
         }
@@ -305,12 +245,10 @@ namespace VBMS.ViewModels
                 string boardId = kvp.Key;
                 DateTime lastSeen = kvp.Value;
 
-                // 5초 이상 신호가 없으면 수신 중단으로 판단
                 if ((now - lastSeen).TotalSeconds > 5)
                 {
                     if (_mappingService.TryGetBoardMapping(boardId, 16, out int lane, out int bayOffset, out int targetBay, out int targetLevel))
                     {
-                        // 최초 타임아웃 발생 시 1회 통신오류 이벤트 로그 추가
                         if (!_boardTimeoutState.ContainsKey(boardId))
                         {
                             _boardTimeoutState[boardId] = true;
@@ -325,7 +263,6 @@ namespace VBMS.ViewModels
                             int startBay = bayOffset + 1;
                             int endBay = bayOffset + 16;
 
-                            // 해당 보드가 위치했던 16개 Bay 영역을 회색(미연결)으로 복구
                             var targetCells = targetRack.CellList.Where(c => c.Bay >= startBay && c.Bay <= endBay);
                             foreach (var cell in targetCells)
                             {
@@ -338,27 +275,18 @@ namespace VBMS.ViewModels
             }
         }
 
-        /// <summary>
-        /// 통계 및 이력 조회 팝업 창 열기
-        /// </summary>
         [RelayCommand]
         private void OpenDataInquiry()
         {
-            // 뷰와 뷰모델 생성 및 연결
             var dataInquiryWindow = new DataInquiryWindow
             {
                 DataContext = new DataInquiryViewModel(),
-                // 메인 창의 자식 팝업으로 지정 (메인 창 중앙 위치 및 최소화/닫기 종속)
                 Owner = Application.Current.MainWindow
             };
 
-            // 팝업 띄우기 (독립적으로 다른 창 작업도 허용하려면 Show(), 모달로 막으려면 ShowDialog())
             dataInquiryWindow.Show();
         }
 
-        /// <summary>
-        /// ROW, BAY, LEVEL 정보를 포함하여 이벤트 로그를 추가하는 헬퍼 메서드
-        /// </summary>
         private void AddEventLog(int row, int bay, int level, string content)
         {
             Application.Current?.Dispatcher.InvokeAsync(() =>
@@ -372,7 +300,6 @@ namespace VBMS.ViewModels
                     DateTime = DateTime.Now.ToString("HH:mm:ss")
                 });
 
-                // 로그 목록이 너무 길어지지 않도록 상위 200개만 유지
                 if (EventLogList.Count > 200)
                 {
                     EventLogList.RemoveAt(EventLogList.Count - 1);

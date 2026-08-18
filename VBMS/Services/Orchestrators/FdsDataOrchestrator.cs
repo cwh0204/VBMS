@@ -19,8 +19,8 @@ namespace VBMS.Services.Orchestrators
         private readonly FdsOpcServer _opcServer;
         private readonly IFdsMappingService _mappingService;
         private readonly FdsOptions _fdsOptions;
-        private readonly IFireSignalEvaluator _signalEvaluator; // ★ 추가
-        private readonly IFireVerificationService _verificationService; // ★ 추가
+        private readonly IFireSignalEvaluator _signalEvaluator;
+        private readonly IFireVerificationService _verificationService;
 
         // 워치독 타이머 및 보드별 수신 시각/타임아웃 상태 관리
         private readonly ConcurrentDictionary<string, DateTime> _boardLastSeen = new();
@@ -31,6 +31,8 @@ namespace VBMS.Services.Orchestrators
         private bool _disposed = false;
 
         public event Action<CrpPacket>? OnPacketProcessed;
+        // ⭐ UI 셀(RackViewModel) 업데이트를 위해 bayOffset 정보를 함께 전달하는 이벤트 추가
+        public event Action<int, CrpPacket>? OnPacketProcessedWithOffset;
         public event Action<bool>? OnConnectionChanged;
         public event Action<string, string>? OnLogMessage;
 
@@ -109,6 +111,9 @@ namespace VBMS.Services.Orchestrators
 
                         foreach (var det in packet.Detectors)
                         {
+                            // ⭐ 각 감지기 객체에 파싱한 BoardId 대입 (UI 수동 리셋 커맨드 생성용)
+                            det.BoardId = boardId;
+
                             // 1. 상태/온도 기반 1차 신호 도출 (0: 정상, 1: 연기, 2: 온도)
                             uint rawSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
 
@@ -135,6 +140,9 @@ namespace VBMS.Services.Orchestrators
                     {
                         OnLogMessage?.Invoke("[WARN] OPC UA NodeManager가 아직 초기화되지 않았습니다.", "Warning");
                     }
+
+                    // ⭐ [추가] 매핑된 bayOffset 정보와 패킷을 UI(RackViewModel) 전달용 이벤트로 발송
+                    OnPacketProcessedWithOffset?.Invoke(bayOffset, packet);
                 }
                 else
                 {

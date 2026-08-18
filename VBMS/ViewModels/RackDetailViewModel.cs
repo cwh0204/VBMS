@@ -1,97 +1,80 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
+using VBMS.Services.Evaluators;
 using VBMS.ViewModels.Components;
 
 namespace VBMS.ViewModels
 {
     public partial class RackDetailViewModel : ObservableObject
     {
+        private readonly IFireVerificationService _fireVerificationService;
+
         [ObservableProperty]
         private RackViewModel _rack;
 
         [ObservableProperty]
-        [NotifyPropertyChangedFor(nameof(HasSelectedCell))]
         private CellViewModel? _selectedCell;
 
-        public bool HasSelectedCell => SelectedCell != null;
+        [ObservableProperty]
+        private int _totalCellCount;
 
-        public int TotalCount => Rack?.CellList?.Count ?? 0;
-        public int NormalCount => Rack?.CellList?.Count(c => CellColors.IsSameColor(c.CellColor, CellColors.Normal)) ?? 0;
-        public int CommErrorCount => Rack?.CellList?.Count(c => CellColors.IsSameColor(c.CellColor, CellColors.Offline)) ?? 0;
-        public int SmokeCount => Rack?.CellList?.Count(c => CellColors.IsSameColor(c.CellColor, CellColors.Warning)) ?? 0;
-        public int FireCount => Rack?.CellList?.Count(c => CellColors.IsSameColor(c.CellColor, CellColors.Alarm)) ?? 0;
-        public int DisabledCount => Rack?.CellList?.Count(c => CellColors.IsSameColor(c.CellColor, CellColors.Disabled)) ?? 0;
+        [ObservableProperty]
+        private int _normalCount;
 
-        public List<string> SimplifiedBayLabels
-        {
-            get
-            {
-                if (Rack == null) return new();
-                var labels = new List<string>();
-                for (int i = 1; i <= Rack.GridColumns; i++)
-                {
-                    if (i == 1 || i % 5 == 0)
-                        labels.Add($"{i:D2}연");
-                    else
-                        labels.Add(string.Empty);
-                }
-                return labels;
-            }
-        }
+        [ObservableProperty]
+        private int _warningCount;
 
-        public RackDetailViewModel(RackViewModel rack)
+        [ObservableProperty]
+        private int _fireCount;
+
+        public RackDetailViewModel(RackViewModel rack, IFireVerificationService fireVerificationService)
         {
             _rack = rack;
+            _fireVerificationService = fireVerificationService;
+
             SelectedCell = Rack?.CellList?.FirstOrDefault();
-
-            //  셀의 색상(CellColor)이 실시간으로 변할 때 하단 요약판 자동 재집계
-            if (Rack?.CellList != null)
-            {
-                foreach (var cell in Rack.CellList)
-                {
-                    cell.PropertyChanged += (s, e) =>
-                    {
-                        if (e.PropertyName == nameof(CellViewModel.CellColor))
-                        {
-                            RefreshCounts();
-                        }
-                    };
-                }
-            }
-
-            // 최초 실행 시 집계 갱신
             RefreshCounts();
         }
 
         public void RefreshCounts()
         {
-            OnPropertyChanged(nameof(TotalCount));
-            OnPropertyChanged(nameof(NormalCount));
-            OnPropertyChanged(nameof(CommErrorCount));
-            OnPropertyChanged(nameof(SmokeCount));
-            OnPropertyChanged(nameof(FireCount));
-            OnPropertyChanged(nameof(DisabledCount));
+            if (Rack?.CellList == null) return;
+
+            TotalCellCount = Rack.CellList.Count;
+            NormalCount = Rack.CellList.Count(c => c.CellColor == "#4CAF50");
+            WarningCount = Rack.CellList.Count(c => c.CellColor == "#FF9800");
+            FireCount = Rack.CellList.Count(c => c.CellColor == "#F44336");
         }
 
         [RelayCommand]
-        private void ResetSelectedCellSensor(CellViewModel? targetCell)
+        private async Task ResetSelectedCellSensorAsync(CellViewModel? targetCell)
         {
             var cellToReset = targetCell ?? SelectedCell;
-            if (cellToReset != null)
+
+            // 1. 셀 선택 여부 확인
+            if (cellToReset == null)
+            {
+                return;
+            }
+
+            // 3. 서비스 호출 결과 확인
+            bool success = await _fireVerificationService.ManualResetAsync(
+                cellToReset.DetectorKey,
+                cellToReset.BoardId.ToString(),
+                cellToReset.LocalBay,
+                cellToReset.Level
+            );
+
+            if (success)
             {
                 cellToReset.ResetSensor();
                 RefreshCounts();
             }
-        }
-
-        [RelayCommand]
-        private void SelectCell(CellViewModel cell)
-        {
-            if (cell != null)
+            else
             {
-                SelectedCell = cell;
             }
         }
     }

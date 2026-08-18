@@ -10,5 +10,7 @@ namespace VBMS.Services.Evaluators
     {
         Task<uint> VerifySignalAsync(string detectorKey, uint evaluatedSignal, string rawBoardId, int bay, int level);
         void ClearState(string detectorKey);
+
+        Task<bool> ManualResetAsync(string detectorKey, string rawBoardId, int bay, int level);
     }
 }

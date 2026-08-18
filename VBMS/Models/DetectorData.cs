@@ -2,14 +2,16 @@
 {
     public class DetectorData
     {
+        public int BoardId { get; set; }         // 보드(장비) 번호
+
         public int Index { get; set; }          // 감지기 번호
 
-        // 새로 추가된 좌표 속성
+        // 좌표 속성
         public int Bay { get; set; }            // 연 (열 위치, 1 ~ 16)
         public int Level { get; set; }          // 단 (행 위치, 0 ~ 15)
         public double Temperature { get; set; } // 온도 (ttt / 10.0)
         public int GasDensity { get; set; }     // 가스농도 (hh)
-        public int Status { get; set; }         // 상태 (d)
+        public int Status { get; set; }          // 상태 (d)
 
         public string StatusText => Status switch
         {
@@ -26,5 +28,8 @@
         };
 
         public bool IsAlarm => Status == 1 || Status == 2;
+
+        // ⭐ DetectorKey를 안전하게 가져오는 읽기전용 속성 추가
+        public string DetectorKey => $"{BoardId:D3}_{Bay:D2}_{Level:D2}";
     }
 }

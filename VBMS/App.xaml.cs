@@ -28,6 +28,10 @@ namespace VBMS
         private readonly IHost _host;
         private ApplicationInstance? _opcApplication;
 
+        // ⭐ [추가] 외부(RackViewModel 등)에서 App.Services 형태로 DI 컨테이너에 접근 가능하도록 설정
+        public new static App Current => (App)Application.Current;
+        public static IServiceProvider Services => Current._host.Services;
+
         public App()
         {
             _host = Host.CreateDefaultBuilder()
@@ -38,18 +42,30 @@ namespace VBMS
                 })
                 .ConfigureServices((context, services) =>
                 {
+                    // 1. 공통 및 옵션 설정
                     services.AddSingleton<INotificationManager, NotificationManager>();
                     services.Configure<FdsOptions>(context.Configuration.GetSection("FdsConfig"));
+
+                    // 2. CRP 통신 및 매핑 데이터 파싱 서비스 (앱 전체 상태 공유를 위해 Singleton)
                     services.AddSingleton<IFdsMappingService, FdsMappingService>();
                     services.AddSingleton<ICrpCommunicationService, CrpCommunicationService>();
                     services.AddSingleton<ICrpDataParser, CrpDataParser>();
                     services.AddSingleton<IFdsDataOrchestrator, FdsDataOrchestrator>();
-                    services.AddSingleton<FdsOpcServer>();
-                    services.AddSingleton<MainWindowViewModel>();
-                    services.AddTransient<MainWindow>();
+
+                    // 3. 화재 판단 및 검증/쿨다운/수동리셋 통합 관리 서비스 (Singleton)
                     services.AddSingleton<IFireSignalEvaluator>(new FireSignalEvaluator(60.0));
                     services.AddSingleton<IFireVerificationService, FireVerificationService>();
 
+                    // 4. OPC UA 서버
+                    services.AddSingleton<FdsOpcServer>();
+
+                    // 5. ViewModels
+                    services.AddSingleton<MainWindowViewModel>();
+                    services.AddTransient<RackDetailViewModel>(); // 랙 상세 팝업용 ViewModel
+
+                    // 6. Views / Windows
+                    services.AddTransient<MainWindow>();
+                    services.AddTransient<RackDetailWindow>();    // 랙 상세 팝업 창
                 })
                 .Build();
         }
@@ -127,7 +143,7 @@ namespace VBMS
 
                 await config.ValidateAsync(ApplicationType.Server);
 
-                // 2. 인증서 검색 및 생성
+                // 인증서 검색 및 생성
                 X509Certificate2 cert = await config.SecurityConfiguration.ApplicationCertificate.FindAsync(true);
                 if (cert == null)
                 {
@@ -139,7 +155,6 @@ namespace VBMS
                 }
                 config.SecurityConfiguration.ApplicationCertificate.Certificate = cert;
 
-                // ★ 3. Task.Run 제거 후 직관적인 서버 실행
                 _opcApplication = new ApplicationInstance((ITelemetryContext)null!)
                 {
                     ApplicationName = "VBMS_FDS_Server",
@@ -172,11 +187,11 @@ namespace VBMS
                     RSASignaturePadding.Pkcs1);
 
                 request.CertificateExtensions.Add(
-                    new X509KeyUsageExtension(
-                        X509KeyUsageFlags.DigitalSignature |
-                        X509KeyUsageFlags.KeyEncipherment |
-                        X509KeyUsageFlags.DataEncipherment,
-                        true));
+                            new X509KeyUsageExtension(
+                                X509KeyUsageFlags.DigitalSignature |
+                                X509KeyUsageFlags.KeyEncipherment |
+                                X509KeyUsageFlags.DataEncipherment,
+                                true));
 
                 var sanBuilder = new SubjectAlternativeNameBuilder();
                 sanBuilder.AddUri(new Uri(applicationUri));

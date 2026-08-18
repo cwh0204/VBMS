@@ -1,12 +1,16 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input; // ⭐ [Step 2] RelayCommand 사용을 위해 추가
+using CommunityToolkit.Mvvm.Input;
+using LiveChartsCore.SkiaSharpView.WPF;
+using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
-using System.Windows; // ⭐ [Step 2] Application, Window 참조용
+using System.Windows;
 using VBMS.Models;
-using VBMS.Views; // ⭐ [Step 2] RackDetailWindow 참조용
+using VBMS.Services.Evaluators; // ⭐ IFireSignalEvaluator 네임스페이스 추가
 using VBMS.ViewModels.Components;
+using VBMS.Views;
 
 namespace VBMS.ViewModels
 {
@@ -33,27 +37,42 @@ namespace VBMS.ViewModels
         [ObservableProperty]
         private string _rackStatusFgColor = "#607D8B";
 
-        // ⭐ 화재 경보 및 테두리 강조용 프로퍼티 추가
         [ObservableProperty]
         private bool _isFireAlarm;
 
         [ObservableProperty]
-        private string _borderColor = "Transparent"; // 기본 테두리 색상 (어두운 회색)
+        private string _borderColor = "Transparent";
 
         [ObservableProperty]
-        private double _borderThickness = 2;     // 기본 테두리 두께
+        private double _borderThickness = 2;
+
+        public List<int> BoardIds { get; private set; } = new();
 
         public ObservableCollection<CellViewModel> CellList { get; set; } = new();
 
-        // 축 라벨 (엑셀표 스타일 헤더용)
-        public ObservableCollection<string> BayLabels { get; } = new();   // 좌→우: "1연","2연",...,"N연"
-        public ObservableCollection<string> LevelLabels { get; } = new(); // 위→아래: 최상단이 먼저 오도록 내림차순 ("15단"...."00단")
+        public ObservableCollection<string> BayLabels { get; } = new();
+        public ObservableCollection<string> LevelLabels { get; } = new();
 
         public RackViewModel(string name, int columns, int rows, double temp)
+            : this(name, columns, rows, temp, null)
+        {
+        }
+
+        public RackViewModel(string name, int columns, int rows, double temp, IEnumerable<int>? boardIds)
         {
             RackName = name;
             Temperature = temp;
+            if (boardIds != null)
+            {
+                BoardIds = boardIds.ToList();
+            }
             BuildGrid(columns, rows);
+        }
+
+        public void SetBoardIds(IEnumerable<int> boardIds)
+        {
+            BoardIds = boardIds?.ToList() ?? new List<int>();
+            BuildGrid(GridColumns, GridRows);
         }
 
         [RelayCommand]
@@ -61,27 +80,23 @@ namespace VBMS.ViewModels
         {
             Application.Current?.Dispatcher.Invoke(() =>
             {
-                // 상세창 ViewModel 및 Window 생성
-                var detailVm = new RackDetailViewModel(this);
+                var fireVerificationService = App.Services.GetRequiredService<IFireVerificationService>();
+                var detailVm = new RackDetailViewModel(this, fireVerificationService);
                 var detailWindow = new RackDetailWindow
                 {
                     DataContext = detailVm,
-                    Owner = Application.Current.MainWindow // 메인 윈도우의 자식 팝업으로 지정
+                    Owner = Application.Current.MainWindow
                 };
 
-                // 모달 팝업으로 열기
                 detailWindow.ShowDialog();
             });
         }
 
-        /// <summary>
-        /// ⭐ 화재 감지 상태에 따라 랙 테두리 색상, 두께 및 상태 텍스트를 업데이트합니다.
-        /// </summary>
         public void SetFireAlarmState(bool isAlarm)
         {
             IsFireAlarm = isAlarm;
             BorderColor = isAlarm ? "#F44336" : "Transparent";
-            BorderThickness = 2; // 두께를 2로 고정하여 레이아웃 크기가 바뀌는 현상(깜빡임) 방지
+            BorderThickness = 2;
 
             if (isAlarm)
             {
@@ -91,19 +106,14 @@ namespace VBMS.ViewModels
             }
             else
             {
-                RackStatusText = "🚨 화재 발생";
+                RackStatusText = "대기";
                 RackStatusBgColor = "#ECEFF1";
                 RackStatusFgColor = "#607D8B";
             }
         }
 
-        /// <summary>
-        /// 실제 장비 패킷 헤더(MaxLine/MaxStage)에 맞춰 그리드 크기를 다시 잡습니다.
-        /// 기존 그리드 크기와 같으면 아무 것도 하지 않습니다 (매 패킷마다 재생성 방지).
-        /// </summary>
         public void ResizeIfNeeded(int columns, int rows)
         {
-            System.Diagnostics.Debug.WriteLine($"[ResizeCheck] 현재:{GridColumns}x{GridRows} -> 요청:{columns}x{rows}");
             if (GridColumns == columns && GridRows == rows && CellList.Count == columns * rows)
             {
                 return;
@@ -125,13 +135,14 @@ namespace VBMS.ViewModels
                     {
                         Bay = bay,
                         Level = level,
+                        BoardId = 0,
+                        LocalBay = 0,
+                        DetectorKey = string.Empty,
                         CellColor = "#9E9E9E",
-                        CellTooltip = $"[ 위치: {bay}연 {level}단 ] 미연결"
+                        CellTooltip = $"[ 위치: {bay}연 {level}단 ] 수신 대기 중..."
                     });
                 }
             }
-
-            // ⭐ 연(Bay) 라벨: 1연 및 5단위(5연, 10연, 15연...)에만 텍스트를 넣고 나머지는 빈 문자열 처리
             BayLabels.Clear();
             for (int bay = 1; bay <= columns; bay++)
             {
@@ -141,7 +152,7 @@ namespace VBMS.ViewModels
                 }
                 else
                 {
-                    BayLabels.Add(string.Empty); // 칸 위치 보정을 위해 빈 값 추가
+                    BayLabels.Add(string.Empty);
                 }
             }
 
@@ -153,44 +164,73 @@ namespace VBMS.ViewModels
         }
 
         /// <summary>
-        /// CRP 장비 패킷의 Detectors 데이터를 Bay Offset 반영하여 화면 셀에 업데이트합니다.
+        /// ⭐ 인자 3개 지원 오버로드 메서드
+        /// 수신 데이터를 받아 CellViewModel 상태를 갱신하고, 해당 랙 내 화재 발생 여부를 반환합니다.
         /// </summary>
-        public void UpdateDetectorCells(int bayOffset, List<DetectorData> detectors)
+        public bool UpdateDetectorCells(int bayOffset, List<DetectorData> detectors, IFireSignalEvaluator? evaluator)
         {
-            if (detectors == null || detectors.Count == 0 || CellList.Count == 0) return;
+            if (detectors == null || detectors.Count == 0 || CellList.Count == 0)
+            {
+                return false;
+            }
+
+            bool hasAnyFire = false;
 
             foreach (var det in detectors)
             {
-                // 1. CRP 내부 Bay(1~16) + Offset = 화면 전체 Bay (1-based)
                 int globalBay = det.Bay + bayOffset;
+                int globalLevel = det.Level;
 
-                // 2. Level(단) 보정 (0-based)
-                int globalLevel = (det.Level >= 13) ? det.Level - 1 : det.Level;
-
-                // 3. 현재 화면 그리드(70x13) 범위를 벗어나는 경우 예외 처리
-                if (globalBay < 1 || globalBay > GridColumns || globalLevel < 0 || globalLevel >= GridRows)
-                    continue;
-
-                // 4. 셀 목록에서 해당 위치(Bay, Level) 셀 검색
                 var targetCell = CellList.FirstOrDefault(c => c.Bay == globalBay && c.Level == globalLevel);
-                if (targetCell != null)
+                if (targetCell == null) continue;
+
+                // 감지기 정보 할당
+                targetCell.BoardId = det.BoardId;
+                targetCell.LocalBay = det.Bay;
+                targetCell.Level = det.Level;
+                targetCell.DetectorKey = $"{det.BoardId:D3}_{det.Bay:D2}_{det.Level:D2}";
+
+                // 신호 평가 (2: 고온/온도화재, 1: 연기화재, 0: 정상)
+                byte fireStatus = evaluator?.Evaluate(det.Status, det.Temperature) ?? 0;
+                if (fireStatus == 1 || fireStatus == 2)
                 {
-                    // 5. 상태 및 온도에 따른 색상/툴팁 변경
-                    string color = "#4CAF50"; // 기본 정상 (초록)
-
-                    if (det.Temperature >= 60.0 || det.Status == 2)
-                    {
-                        color = "#F44336"; // 화재/위험 (빨강)
-                    }
-                    else if (det.Status == 1)
-                    {
-                        color = "#FF9800"; // 경고/주의 (주황)
-                    }
-
-                    targetCell.CellColor = color;
-                    targetCell.CellTooltip = $"[ 위치: {globalBay}연 {globalLevel:00}단 ] 온도: {det.Temperature:F1}℃ / 상태: {det.Status}";
+                    hasAnyFire = true;
                 }
+
+                // 셀 색상 할당
+                if (det.Status == 3)
+                {
+                    targetCell.CellColor = "#FFC107"; // 통신/연결 오류 (노랑)
+                }
+                else if (fireStatus == 2)
+                {
+                    targetCell.CellColor = "#F44336"; // 온도 화재 (빨강)
+                }
+                else if (fireStatus == 1)
+                {
+                    targetCell.CellColor = "#FF9800"; // 연기 감지 (주황)
+                }
+                else if (det.Status == 0 && fireStatus == 0)
+                {
+                    targetCell.CellColor = "#4CAF50"; // 정상 (초록)
+                }
+                else
+                {
+                    targetCell.CellColor = "#9E9E9E"; // 미연결 (회색)
+                }
+
+                // 툴팁 텍스트 설정
+                string statusText = det.Status == 3 ? "통신오류" : fireStatus switch
+                {
+                    2 => "화재(온도)",
+                    1 => "화재(연기)",
+                    _ => det.Status == 0 ? "정상" : "미연결"
+                };
+
+                targetCell.CellTooltip = $"[ 위치: {targetCell.Bay}연 {targetCell.Level}단 ]\n• 센서 ID: #{det.Index}\n• 상태: {statusText}\n• 온도: {det.Temperature:F1}℃";
             }
+
+            return hasAnyFire;
         }
     }
 }

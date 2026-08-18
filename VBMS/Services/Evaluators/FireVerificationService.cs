@@ -87,11 +87,34 @@ namespace VBMS.Services.Evaluators
             return evaluatedSignal;
         }
 
+        /// <summary>
+        /// UI 수동 리셋 처리 (보드 포맷팅, RSR 커맨드 전송, internal state 수거)
+        /// </summary>
+        public async Task<bool> ManualResetAsync(string detectorKey, string rawBoardId, int bay, int level)
+        {
+
+            int.TryParse(rawBoardId, out int bId);
+            string boardFormatted = bId > 0 ? bId.ToString("D3") : rawBoardId.PadLeft(3, '0');
+            string resetCmd = $"[{boardFormatted}RSR{bay:D2}{level:D2}]";
+
+            try
+            {
+                await _crpService.SendCommandAsync(resetCmd);
+
+                // 전송 성공 시 상태 초기화
+                ClearState(detectorKey);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+        }
+
         public void ClearState(string detectorKey)
         {
             if (_states.TryRemove(detectorKey, out _))
             {
-                Debug.WriteLine($"[FDS-VERIFY] [{detectorKey}] 수동 상태 수거/초기화 완료");
             }
         }
     }

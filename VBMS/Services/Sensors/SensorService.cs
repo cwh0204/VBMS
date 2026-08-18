@@ -31,8 +31,6 @@ namespace VBMS.Services.Sensors
                 string boardFormatted = bId > 0 ? bId.ToString("D3") : rawBoardId.PadLeft(3, '0');
                 string resetCmd = $"[{boardFormatted}RSR{bay:D2}{level:D2}]";
 
-                Debug.WriteLine($"[SENSOR-SERVICE] [{detectorKey}] 수동 센서 리셋 전송: {resetCmd}");
-
                 // 2. CRP 통신으로 패킷 전송
                 await _crpService.SendCommandAsync(resetCmd);
 
@@ -43,7 +41,6 @@ namespace VBMS.Services.Sensors
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SENSOR-SERVICE] [{detectorKey}] 리셋 실패: {ex.Message}");
                 return false;
             }
         }

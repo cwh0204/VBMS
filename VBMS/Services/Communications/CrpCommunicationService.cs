@@ -259,7 +259,6 @@ namespace VBMS.Services.Communications
         private void Log(string message, string type)
         {
             string formatted = $"[{DateTime.Now:HH:mm:ss.fff}] [{type}] {message}";
-            Debug.WriteLine(formatted);
 
             // [인터페이스 이벤트 이름 적용] OnLogMessage
             OnLogMessage?.Invoke(message, type);
