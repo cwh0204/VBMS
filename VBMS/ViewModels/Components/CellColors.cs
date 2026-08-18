@@ -1,7 +1,6 @@
-using CommunityToolkit.Mvvm.ComponentModel;
-using System;
+﻿using System;
 
-namespace VBMS.ViewModels
+namespace VBMS.ViewModels.Components
 {
     public static class CellColors
     {
@@ -11,9 +10,6 @@ namespace VBMS.ViewModels
         public const string Alarm = "#F44336";     // 화재발생
         public const string Disabled = "#607D8B";  // 사용중지
 
-        /// <summary>
-        /// 대소문자 구분 없이 Hex 색상 코드가 일치하는지 비교
-        /// </summary>
         public static bool IsSameColor(string? color1, string? color2)
         {
             return string.Equals(color1, color2, StringComparison.OrdinalIgnoreCase);
@@ -27,27 +23,6 @@ namespace VBMS.ViewModels
             if (IsSameColor(hex, Offline)) return "통신오류";
             if (IsSameColor(hex, Normal)) return "정상";
             return "알수없음";
-        }
-    }
-
-    public partial class CellViewModel : ObservableObject
-    {
-        [ObservableProperty]
-        private bool _isDimmed;
-
-        [ObservableProperty]
-        private double _temperature = 25.0;
-
-        public bool IsException => CellColors.IsSameColor(CellColor, CellColors.Warning) || CellColors.IsSameColor(CellColor, CellColors.Alarm);
-
-        public string ExceptionSummary => CellTooltip;
-
-        public void ResetSensor()
-        {
-            if (IsException)
-            {
-                CellColor = CellColors.Normal;
-            }
         }
     }
 }

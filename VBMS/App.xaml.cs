@@ -49,6 +49,7 @@ namespace VBMS
                     services.AddTransient<MainWindow>();
                     services.AddSingleton<IFireSignalEvaluator>(new FireSignalEvaluator(60.0));
                     services.AddSingleton<IFireVerificationService, FireVerificationService>();
+
                 })
                 .Build();
         }

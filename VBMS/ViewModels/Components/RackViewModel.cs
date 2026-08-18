@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows; // ⭐ [Step 2] Application, Window 참조용
 using VBMS.Models;
 using VBMS.Views; // ⭐ [Step 2] RackDetailWindow 참조용
+using VBMS.ViewModels.Components;
 
 namespace VBMS.ViewModels
 {
@@ -90,7 +91,7 @@ namespace VBMS.ViewModels
             }
             else
             {
-                RackStatusText = "정상";
+                RackStatusText = "🚨 화재 발생";
                 RackStatusBgColor = "#ECEFF1";
                 RackStatusFgColor = "#607D8B";
             }
@@ -116,9 +117,9 @@ namespace VBMS.ViewModels
             GridRows = rows;
 
             CellList.Clear();
-            for (int level = 0; level < rows; level++) // 단: 0-based (문서 스펙)
+            for (int level = 0; level < rows; level++)
             {
-                for (int bay = 1; bay <= columns; bay++) // 연: 1-based (문서 스펙)
+                for (int bay = 1; bay <= columns; bay++)
                 {
                     CellList.Add(new CellViewModel
                     {
@@ -130,15 +131,22 @@ namespace VBMS.ViewModels
                 }
             }
 
-            // 라벨은 실제로 화면에 "보이는" 순서(위→아래, 좌→우)로 채움
+            // ⭐ 연(Bay) 라벨: 1연 및 5단위(5연, 10연, 15연...)에만 텍스트를 넣고 나머지는 빈 문자열 처리
             BayLabels.Clear();
             for (int bay = 1; bay <= columns; bay++)
             {
-                BayLabels.Add($"{bay}연");
+                if (bay == 1 || bay % 5 == 0)
+                {
+                    BayLabels.Add($"{bay}연");
+                }
+                else
+                {
+                    BayLabels.Add(string.Empty); // 칸 위치 보정을 위해 빈 값 추가
+                }
             }
 
             LevelLabels.Clear();
-            for (int level = rows - 1; level >= 0; level--) // 위쪽이 높은 단, 아래쪽이 00단
+            for (int level = rows - 1; level >= 0; level--)
             {
                 LevelLabels.Add($"{level:00}단");
             }
@@ -184,20 +192,5 @@ namespace VBMS.ViewModels
                 }
             }
         }
-    }
-
-    public partial class CellViewModel : ObservableObject
-    {
-        [ObservableProperty]
-        private int _bay;
-
-        [ObservableProperty]
-        private int _level;
-
-        [ObservableProperty]
-        private string _cellColor = "#9E9E9E";
-
-        [ObservableProperty]
-        private string _cellTooltip = string.Empty;
     }
 }

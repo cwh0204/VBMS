@@ -2,6 +2,7 @@
 using CommunityToolkit.Mvvm.Input;
 using System.Collections.Generic;
 using System.Linq;
+using VBMS.ViewModels.Components;
 
 namespace VBMS.ViewModels
 {
