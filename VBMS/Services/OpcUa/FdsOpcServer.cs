@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using VBMS.Models;
 using VBMS.Services.Evaluators;
 
-namespace VBMS.Services.Communications.OpcUa
+namespace VBMS.Services.OpcUa
 {
     public class FdsOpcServer : StandardServer
     {

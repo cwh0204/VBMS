@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using VBMS.Models;
 using VBMS.Services.Communications;
-using VBMS.Services.Communications.OpcUa;
-using VBMS.Services.Evaluators; // ★ 검증/평가 서비스 네임스페이스 추가
+using VBMS.Services.Evaluators;
+using VBMS.Services.OpcUa; // ★ 검증/평가 서비스 네임스페이스 추가
 
 namespace VBMS.Services.Orchestrators
 {

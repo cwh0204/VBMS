@@ -3,61 +3,28 @@ using Opc.Ua;
 using Opc.Ua.Server;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using VBMS.Models;
-using VBMS.Services.Evaluators; // IFireSignalEvaluator 네임스페이스
+using VBMS.Services.Evaluators;
 
-namespace VBMS.Services.Communications.OpcUa
+namespace VBMS.Services.OpcUa
 {
-    // 1. OPC UA 직렬화를 위한 IEncodeable 구현
-    public class FireSignalInfo : IEncodeable
-    {
-        public uint Signal { get; set; }
-        public DateTime TimeStamp { get; set; }
-
-        public ExpandedNodeId TypeId => new ExpandedNodeId(new NodeId("FireSignalInfo", 2));
-        public ExpandedNodeId BinaryEncodingId => new ExpandedNodeId(new NodeId("FireSignalInfo_Encoding_DefaultBinary", 2));
-        public ExpandedNodeId XmlEncodingId => ExpandedNodeId.Null;
-
-        public void Encode(IEncoder encoder)
-        {
-            encoder.WriteUInt32("Signal", Signal);
-            encoder.WriteDateTime("TimeStamp", TimeStamp);
-        }
-
-        public void Decode(IDecoder decoder)
-        {
-            Signal = decoder.ReadUInt32("Signal");
-            TimeStamp = decoder.ReadDateTime("TimeStamp");
-        }
-
-        public bool IsEqual(IEncodeable value)
-        {
-            if (value is FireSignalInfo target)
-            {
-                return Signal == target.Signal && TimeStamp == target.TimeStamp;
-            }
-            return false;
-        }
-
-        public object Clone() => MemberwiseClone();
-    }
-
-    // 2. FDS 노드 매니저
+    /// <summary>
+    /// FDS OPC UA 노드 매니저
+    /// </summary>
     public class FdsNodeManager : CustomNodeManager2
     {
         private BaseDataVariableState? _aliveNode;
         private BaseDataVariableState? _lane1RackNode;
         private BaseDataVariableState? _lane2RackNode;
         private readonly FdsOptions _options;
-        private readonly IFireSignalEvaluator _signalEvaluator; 
+        private readonly IFireSignalEvaluator _signalEvaluator;
 
         public FdsNodeManager(
             IServerInternal server,
             ApplicationConfiguration configuration,
             IOptions<FdsOptions> options,
-            IFireSignalEvaluator signalEvaluator) 
+            IFireSignalEvaluator signalEvaluator)
             : base(server, configuration, "http://vbms.com/FDS/")
         {
             _options = options.Value;
@@ -90,12 +57,12 @@ namespace VBMS.Services.Communications.OpcUa
                 _aliveNode.Value = true;
 
                 var lane1Opt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == 1);
-                int lane1Bay = (lane1Opt != null && lane1Opt.TargetBay > 0) ? lane1Opt.TargetBay : 70;
-                int lane1Level = (lane1Opt != null && lane1Opt.TargetLevel > 0) ? lane1Opt.TargetLevel : 13;
+                int lane1Bay = lane1Opt != null && lane1Opt.TargetBay > 0 ? lane1Opt.TargetBay : 70;
+                int lane1Level = lane1Opt != null && lane1Opt.TargetLevel > 0 ? lane1Opt.TargetLevel : 13;
 
                 var lane2Opt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == 2);
-                int lane2Bay = (lane2Opt != null && lane2Opt.TargetBay > 0) ? lane2Opt.TargetBay : 54;
-                int lane2Level = (lane2Opt != null && lane2Opt.TargetLevel > 0) ? lane2Opt.TargetLevel : 13;
+                int lane2Bay = lane2Opt != null && lane2Opt.TargetBay > 0 ? lane2Opt.TargetBay : 54;
+                int lane2Level = lane2Opt != null && lane2Opt.TargetLevel > 0 ? lane2Opt.TargetLevel : 13;
 
                 FolderState lane1Folder = CreateFolder(f1fds01Folder, "Lane1", "Lane1");
                 _lane1RackNode = CreateRackVariable(lane1Folder, "Lane1_Rack", "Rack", dataTypeId, lane1Bay, lane1Level);
@@ -215,12 +182,12 @@ namespace VBMS.Services.Communications.OpcUa
 
             var laneOpt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == lane);
 
-            int maxBay = (laneOpt != null && laneOpt.TargetBay > 0) ? laneOpt.TargetBay : (lane == 1 ? 70 : 54);
-            int maxLevel = (laneOpt != null && laneOpt.TargetLevel > 0) ? laneOpt.TargetLevel : 13;
+            int maxBay = laneOpt != null && laneOpt.TargetBay > 0 ? laneOpt.TargetBay : lane == 1 ? 70 : 54;
+            int maxLevel = laneOpt != null && laneOpt.TargetLevel > 0 ? laneOpt.TargetLevel : 13;
 
             lock (Lock)
             {
-                BaseDataVariableState? targetNode = (lane == 1) ? _lane1RackNode : _lane2RackNode;
+                BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode == null) return;
 
                 var matrix = targetNode.Value as ExtensionObject[,];
@@ -235,12 +202,11 @@ namespace VBMS.Services.Communications.OpcUa
 
                 foreach (var det in detectors)
                 {
-                    int globalRow = (det.Bay - 1) + bayOffset;
-                    int col = (det.Level >= 13) ? det.Level - 1 : det.Level;
+                    int globalRow = det.Bay - 1 + bayOffset;
+                    int col = det.Level >= 13 ? det.Level - 1 : det.Level;
 
                     if (globalRow >= 0 && globalRow < maxBay && col >= 0 && col < maxLevel)
                     {
-                        // IFireSignalEvaluator 서비스를 호출하여 0(정상), 1(연기), 2(온도) 코드 도출
                         uint finalSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
 
                         matrix[globalRow, col] = new ExtensionObject(new FireSignalInfo
@@ -264,12 +230,12 @@ namespace VBMS.Services.Communications.OpcUa
         public void UpdateRackCell(int lane, int row, int col, uint signal)
         {
             var laneOpt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == lane);
-            int targetBay = (laneOpt != null && laneOpt.TargetBay > 0) ? laneOpt.TargetBay : (lane == 1 ? 70 : 54);
-            int targetLevel = (laneOpt != null && laneOpt.TargetLevel > 0) ? laneOpt.TargetLevel : 13;
+            int targetBay = laneOpt != null && laneOpt.TargetBay > 0 ? laneOpt.TargetBay : lane == 1 ? 70 : 54;
+            int targetLevel = laneOpt != null && laneOpt.TargetLevel > 0 ? laneOpt.TargetLevel : 13;
 
             lock (Lock)
             {
-                BaseDataVariableState? targetNode = (lane == 1) ? _lane1RackNode : _lane2RackNode;
+                BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode == null) return;
 
                 var matrix = targetNode.Value as ExtensionObject[,];
@@ -291,12 +257,12 @@ namespace VBMS.Services.Communications.OpcUa
         public void UpdateRackAll(int lane, uint[,] signalMatrix)
         {
             var laneOpt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == lane);
-            int targetBay = (laneOpt != null && laneOpt.TargetBay > 0) ? laneOpt.TargetBay : (lane == 1 ? 70 : 54);
-            int targetLevel = (laneOpt != null && laneOpt.TargetLevel > 0) ? laneOpt.TargetLevel : 13;
+            int targetBay = laneOpt != null && laneOpt.TargetBay > 0 ? laneOpt.TargetBay : lane == 1 ? 70 : 54;
+            int targetLevel = laneOpt != null && laneOpt.TargetLevel > 0 ? laneOpt.TargetLevel : 13;
 
             lock (Lock)
             {
-                BaseDataVariableState? targetNode = (lane == 1) ? _lane1RackNode : _lane2RackNode;
+                BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode == null) return;
 
                 int inputRows = signalMatrix.GetLength(0);
@@ -309,7 +275,7 @@ namespace VBMS.Services.Communications.OpcUa
                 {
                     for (int j = 0; j < targetLevel; j++)
                     {
-                        uint sig = (i < inputRows && j < inputCols) ? signalMatrix[i, j] : 0;
+                        uint sig = i < inputRows && j < inputCols ? signalMatrix[i, j] : 0;
 
                         matrix[i, j] = new ExtensionObject(new FireSignalInfo
                         {
@@ -328,7 +294,7 @@ namespace VBMS.Services.Communications.OpcUa
         {
             lock (Lock)
             {
-                BaseDataVariableState? targetNode = (lane == 1) ? _lane1RackNode : _lane2RackNode;
+                BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode?.Value is not ExtensionObject[,] matrix) return;
 
                 int maxBay = matrix.GetLength(0);
