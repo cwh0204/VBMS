@@ -9,6 +9,25 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Converters\**" />
+    <Compile Remove="Data\**" />
+    <Compile Remove="ViewModels\Base\**" />
+    <Compile Remove="ViewModels\Dialogs\**" />
+    <EmbeddedResource Remove="Converters\**" />
+    <EmbeddedResource Remove="Data\**" />
+    <EmbeddedResource Remove="ViewModels\Base\**" />
+    <EmbeddedResource Remove="ViewModels\Dialogs\**" />
+    <None Remove="Converters\**" />
+    <None Remove="Data\**" />
+    <None Remove="ViewModels\Base\**" />
+    <None Remove="ViewModels\Dialogs\**" />
+    <Page Remove="Converters\**" />
+    <Page Remove="Data\**" />
+    <Page Remove="ViewModels\Base\**" />
+    <Page Remove="ViewModels\Dialogs\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
     <PackageReference Include="LiveChartsCore.SkiaSharpView.WPF" Version="2.0.5" />
@@ -21,12 +40,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Converters\" />
-    <Folder Include="Data\Background\" />
-    <Folder Include="Data\Repositories\" />
     <Folder Include="Tests\" />
-    <Folder Include="ViewModels\Base\" />
-    <Folder Include="ViewModels\Dialogs\" />
   </ItemGroup>
 
   <ItemGroup>

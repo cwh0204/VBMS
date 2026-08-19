@@ -1,6 +1,7 @@
-﻿using System;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -9,125 +10,166 @@ using VBMS.Repositories;
 
 namespace VBMS.Services.Storage
 {
-    public class TelemetryStorageService : ITelemetryStorageService
+    public class TelemetryStorageService : BackgroundService, ITelemetryStorageService
     {
         private readonly IDetectorRepository _repository;
-        private readonly Channel<(DetectorData Data, DateTime ReceivedAt)> _channel;
-        private CancellationTokenSource? _cts;
-        private Task? _processingTask;
+        private readonly ILogger<TelemetryStorageService> _logger;
 
-        public TelemetryStorageService(IDetectorRepository repository)
+        // SingleReader = true로 백그라운드 스레드 단일 처리 보장
+        private readonly Channel<DetectorData> _channel = Channel.CreateUnbounded<DetectorData>(
+            new UnboundedChannelOptions { SingleReader = true });
+
+        private const int BatchSize = 100;
+
+        public TelemetryStorageService(IDetectorRepository repository, ILogger<TelemetryStorageService> logger)
         {
-            _repository = repository;
-
-            // 비동기 큐 (단일 수신자, 다중 비동기 송신자)
-            _channel = Channel.CreateUnbounded<(DetectorData, DateTime)>(new UnboundedChannelOptions
-            {
-                SingleWriter = false,
-                SingleReader = true
-            });
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public void Start()
+        public bool Enqueue(DetectorData data)
         {
-            if (_processingTask != null) return;
-
-            _cts = new CancellationTokenSource();
-            _processingTask = Task.Run(() => ProcessQueueAsync(_cts.Token));
+            return _channel.Writer.TryWrite(data);
         }
 
-        public async Task StopAsync()
+        public bool EnqueueRange(IEnumerable<DetectorData> dataList)
         {
-            _channel.Writer.Complete();
-
-            if (_cts != null)
+            bool allSuccess = true;
+            foreach (var item in dataList)
             {
-                _cts.Cancel();
+                if (!_channel.Writer.TryWrite(item))
+                {
+                    allSuccess = false;
+                }
             }
-
-            if (_processingTask != null)
-            {
-                await _processingTask;
-            }
+            return allSuccess;
         }
 
-        public void EnqueueData(IEnumerable<DetectorData> logs)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            if (logs == null) return;
+            _logger.LogInformation("Telemetry Storage Service 가동 완료.");
 
-            DateTime receivedAt = DateTime.Now;
+            // 7일 경과 데이터 자동 삭제 백그라운드 루프
+            var purgeTask = RunPeriodicPurgeAsync(stoppingToken);
 
-            foreach (var log in logs)
-            {
-                _channel.Writer.TryWrite((log, receivedAt));
-            }
-        }
+            var batch = new List<DetectorData>(BatchSize);
 
-        private async Task ProcessQueueAsync(CancellationToken cancellationToken)
-        {
-            var buffer = new List<(DetectorData Data, DateTime ReceivedAt)>();
-
-            while (!cancellationToken.IsCancellationRequested)
+            // 🌟 예외 발생 없는 표준 Channel 수신 루프
+            while (await _channel.Reader.WaitToReadAsync(stoppingToken))
             {
                 try
                 {
-                    // 4초 주기로 큐의 데이터를 모아서 처리 (UI 차트/통계 최적화 주기)
-                    await Task.Delay(4000, cancellationToken);
-
-                    while (_channel.Reader.TryRead(out var item))
+                    // 큐에 들어와 있는 데이터를 대기 없이 최대 BatchSize만큼 즉시 꺼냄
+                    while (batch.Count < BatchSize && _channel.Reader.TryRead(out var item))
                     {
-                        buffer.Add(item);
+                        batch.Add(item);
                     }
 
-                    if (buffer.Count > 0)
+                    // 꺼낸 데이터가 있다면 즉시 DB에 저장
+                    if (batch.Count > 0)
                     {
-                        // 1. 4초간 쌓인 감지기 데이터를 Rack별로 그룹화하여 4초 요약 로그(CrpSummaryLog) 생성
-                        var summaryLogs = buffer
-                            .GroupBy(x => new
-                            {
-                                RackId = $"BAY{x.Data.Bay:D2}_LV{x.Data.Level:D2}",
-                                x.Data.BoardId
-                            })
-                            .Select(g => new CrpSummaryLog
-                            {
-                                Timestamp = DateTime.Now,
-                                RackId = g.Key.RackId,
-                                BoardId = g.Key.BoardId,
-                                AvgTemperature = Math.Round(g.Average(x => x.Data.Temperature), 1),
-                                MaxTemperature = g.Max(x => x.Data.Temperature),
-                                MinTemperature = g.Min(x => x.Data.Temperature),
-                                AvgGasLevel = Math.Round(g.Average(x => x.Data.GasDensity), 1),
-                                MaxGasLevel = g.Max(x => x.Data.GasDensity),
-                                HasFireAlarm = g.Any(x => x.Data.Status == 1 || x.Data.Status == 2),
-                                HasSensorError = g.Any(x => x.Data.Status >= 3)
-                            })
-                            .ToList();
-
-                        // 요약 데이터 저장 (통계/차트용)
-                        _repository.SaveSummaryBatch(summaryLogs);
-
-                        // 2. 이상징후(화재 경보 또는 센서 오류)가 포함된 원시 데이터는 Dump 테이블에 저장
-                        var anomalyItems = buffer
-                            .Where(x => x.Data.Status != 0)
-                            .ToList();
-
-                        if (anomalyItems.Count > 0)
-                        {
-                            _repository.SaveDumpBatch(anomalyItems);
-                        }
-
-                        // 버퍼 비우기
-                        buffer.Clear();
+                        await FlushBatchWithRetryAsync(batch);
                     }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[TelemetryStorageService] 저장 오류: {ex.Message}");
+                    _logger.LogError(ex, "텔레메트리 데이터 수집 처리 중 예외 발생");
                 }
+            }
+
+            // 앱 종료 시 남아있는 메모리 데이터 최종 저장
+            await FlushRemainingDataAsync();
+        }
+
+        // 🌟 [개선] DB Lock 등 일시적 실패 발생 시 최대 3회 재시도하여 데이터 유실 방지
+        private async Task FlushBatchWithRetryAsync(List<DetectorData> batch)
+        {
+            int retryCount = 0;
+            const int maxRetries = 3;
+
+            while (retryCount < maxRetries)
+            {
+                try
+                {
+                    await _repository.InsertTelemetryBatchAsync(batch);
+                    batch.Clear(); // 🌟 DB 저장 성공시에만 배치를 비움!
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    _logger.LogWarning(ex, "DuckDB 배치 저장 실패 ({Retry}/{MaxRetries}). 200ms 후 재시도합니다.", retryCount, maxRetries);
+
+                    if (retryCount >= maxRetries)
+                    {
+                        _logger.LogError("DuckDB 배치 저장 최종 실패. 데이터 유실 발생 ({Count}건)", batch.Count);
+                        batch.Clear(); // 최대 재시도 실패 시에만 다음 수신을 위해 비움
+                    }
+                    else
+                    {
+                        await Task.Delay(200); // DB 락 해제 대기
+                    }
+                }
+            }
+        }
+
+        private async Task RunPeriodicPurgeAsync(CancellationToken stoppingToken)
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromHours(12));
+
+            // 서비스 시작 10초 후 첫 삭제 실행 (초기 구동 시 DB Insert와의 충돌 방지)
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await PurgeOldDataAsync();
+
+            try
+            {
+                while (await timer.WaitForNextTickAsync(stoppingToken))
+                {
+                    await PurgeOldDataAsync();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 정상 종료
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "텔레메트리 Purge 스케줄러 실행 중 예외 발생");
+            }
+        }
+
+        private async Task PurgeOldDataAsync()
+        {
+            try
+            {
+                _logger.LogInformation("7일 경과 원시 텔레메트리 데이터 정리를 시작합니다.");
+                await Task.Run(() => _repository.PurgeOldTelemetry(7));
+                _logger.LogInformation("7일 경과 원시 텔레메트리 데이터 정리 완료.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "7일 경과 텔레메트리 데이터 Purge 실패");
+            }
+        }
+
+        private async Task FlushRemainingDataAsync()
+        {
+            _logger.LogInformation("남아있는 텔레메트리 데이터 Flush 시작...");
+            var remainingBatch = new List<DetectorData>();
+
+            while (_channel.Reader.TryRead(out var item))
+            {
+                remainingBatch.Add(item);
+            }
+
+            if (remainingBatch.Count > 0)
+            {
+                await FlushBatchWithRetryAsync(remainingBatch);
+                _logger.LogInformation("미저장 데이터 {Count}건 정리 완료.", remainingBatch.Count);
             }
         }
     }

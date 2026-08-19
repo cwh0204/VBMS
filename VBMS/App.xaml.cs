@@ -2,14 +2,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Notification.Wpf;
-using Opc.Ua;
-using Opc.Ua.Configuration;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using VBMS.Models;
@@ -28,14 +23,13 @@ namespace VBMS
     public partial class App : Application
     {
         private IHost? _host;
-        private ApplicationInstance? _opcApplication;
+        private static Mutex? _mutex; // 중복 실행 방지용 뮤텍스
 
         public new static App Current => (App)Application.Current;
         public static IServiceProvider Services => Current._host!.Services;
 
         public App()
         {
-            // [중요] 앱 강제 종료(Crash) 시 원인을 catch하여 crash.log에 기록
             RegisterGlobalExceptionHandlers();
 
             _host = Host.CreateDefaultBuilder()
@@ -46,22 +40,32 @@ namespace VBMS
                 })
                 .ConfigureServices((context, services) =>
                 {
+                    // Repositories (DuckDB)
                     services.AddSingleton<IDetectorRepository, DuckDbRepository>();
-                    services.AddSingleton<ITelemetryStorageService, TelemetryStorageService>();
 
+                    // 1. TelemetryStorageService 싱글톤 + HostedService 동시 등록
+                    services.AddSingleton<TelemetryStorageService>();
+                    services.AddSingleton<ITelemetryStorageService>(sp => sp.GetRequiredService<TelemetryStorageService>());
+                    services.AddHostedService(sp => sp.GetRequiredService<TelemetryStorageService>());
+
+                    // Options & Notification
                     services.AddSingleton<INotificationManager, NotificationManager>();
                     services.Configure<FdsOptions>(context.Configuration.GetSection("FdsConfig"));
 
+                    // Domain Services
                     services.AddSingleton<IFdsMappingService, FdsMappingService>();
                     services.AddSingleton<ICrpCommunicationService, CrpCommunicationService>();
                     services.AddSingleton<ICrpDataParser, CrpDataParser>();
                     services.AddSingleton<IFdsDataOrchestrator, FdsDataOrchestrator>();
 
-                    services.AddSingleton<IFireSignalEvaluator>(new FireSignalEvaluator(60.0));
+                    services.AddSingleton<IFireSignalEvaluator>(sp => new FireSignalEvaluator(60.0));
                     services.AddSingleton<IFireVerificationService, FireVerificationService>();
 
+                    // 2. OPC UA Server 및 HostedService 등록
                     services.AddSingleton<FdsOpcServer>();
+                    services.AddHostedService<FdsOpcServerHostedService>();
 
+                    // UI ViewModels & Windows
                     services.AddSingleton<MainWindowViewModel>();
                     services.AddTransient<RackDetailViewModel>();
 
@@ -75,157 +79,74 @@ namespace VBMS
         {
             base.OnStartup(e);
 
+            // 🌟 1. 중복 실행 체크 (DuckDB 파일 락 및 OPC UA 포트 충돌 방지)
+            const string mutexName = "Global\\VBMS_FireMonitoringSystem_SingleInstance_Mutex";
+            _mutex = new Mutex(true, mutexName, out bool createdNew);
+
+            if (!createdNew)
+            {
+                MessageBox.Show("VBMS 화재 감지 모니터링 프로그램이 이미 실행 중입니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Warning);
+                Shutdown();
+                return;
+            }
+
             try
             {
-                // 1. UI 창 최우선 로딩
+                // 🌟 2. 백그라운드 서비스(DuckDB, OPC UA 등) 먼저 시동
+                await _host!.StartAsync();
+
+                // 🌟 3. 서비스가 정상 시작되면 메인 화면 표시
                 var mainWindow = _host.Services.GetRequiredService<MainWindow>();
                 mainWindow.DataContext = _host.Services.GetRequiredService<MainWindowViewModel>();
                 mainWindow.Show();
-
-                // 2. 백그라운드 Host 시작
-                await _host.StartAsync();
-
-                // 3. 데이터 저장소 서비스 시작
-                var storageService = _host.Services.GetRequiredService<ITelemetryStorageService>();
-                storageService.Start();
-
-                // 4. OPC UA 서버 비동기 시작
-                InitializeOpcUaServer();
             }
             catch (Exception ex)
             {
-                LogCrash("OnStartup 예외 발생", ex);
-                MessageBox.Show($"시작 중 오류 발생: {ex.Message}", "치명적 오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                LogCrash("OnStartup 구동 중 예외 발생", ex);
+                MessageBox.Show($"시스템 시작 중 오류가 발생하여 프로그램을 종료합니다.\n\n오류 내용: {ex.Message}", "치명적 오류", MessageBoxButton.OK, MessageBoxImage.Error);
+
+                // 구동 실패 시 프로그램 즉시 종료
+                Shutdown();
             }
         }
 
-        private async void InitializeOpcUaServer()
+        protected override void OnExit(ExitEventArgs e)
         {
-            try
+            // 🌟 4. 교착 상태(Deadlock) 없는 안전한 백그라운드 서비스 정지
+            if (_host != null)
             {
-                var opcServer = _host!.Services.GetRequiredService<FdsOpcServer>();
-                string hostName = System.Net.Dns.GetHostName();
-
-                var baseAddresses = new StringCollection { "opc.tcp://0.0.0.0:4840/VBMS/FDS" };
-
-                var config = new ApplicationConfiguration()
+                try
                 {
-                    ApplicationName = "VBMS_FDS_Server",
-                    ApplicationUri = $"urn:{hostName}:VBMS:VBMS_FDS_Server",
-                    ApplicationType = ApplicationType.Server,
-                    SecurityConfiguration = new SecurityConfiguration
+                    // UI 스레드를 멈추지 않도록 별도 Task에서 StopAsync 실행 (최대 5초 대기)
+                    Task.Run(async () =>
                     {
-                        ApplicationCertificate = new CertificateIdentifier
-                        {
-                            StoreType = "Directory",
-                            StorePath = "%CommonApplicationData%\\OPC Foundation\\CertificateStores\\MachineDefault",
-                            SubjectName = $"CN=VBMS FDS Server, DC={hostName}"
-                        },
-                        TrustedPeerCertificates = new CertificateTrustList
-                        {
-                            StoreType = "Directory",
-                            StorePath = "%CommonApplicationData%\\OPC Foundation\\CertificateStores\\UA Applications"
-                        },
-                        TrustedIssuerCertificates = new CertificateTrustList
-                        {
-                            StoreType = "Directory",
-                            StorePath = "%CommonApplicationData%\\OPC Foundation\\CertificateStores\\UA Certificate Authorities"
-                        },
-                        RejectedCertificateStore = new CertificateTrustList
-                        {
-                            StoreType = "Directory",
-                            StorePath = "%CommonApplicationData%\\OPC Foundation\\CertificateStores\\RejectedCertificates"
-                        },
-                        AutoAcceptUntrustedCertificates = true
-                    },
-                    TransportQuotas = new TransportQuotas
-                    {
-                        OperationTimeout = 60000,
-                        MaxStringLength = 1048576,
-                        MaxByteStringLength = 1048576,
-                        MaxArrayLength = 65535,
-                        MaxMessageSize = 4194304,
-                        MaxBufferSize = 65535,
-                        ChannelLifetime = 300000,
-                        SecurityTokenLifetime = 3600000
-                    },
-                    ServerConfiguration = new ServerConfiguration
-                    {
-                        BaseAddresses = baseAddresses,
-                        SecurityPolicies = new ServerSecurityPolicyCollection
-                        {
-                            new ServerSecurityPolicy
-                            {
-                                SecurityPolicyUri = SecurityPolicies.None,
-                                SecurityMode = MessageSecurityMode.None
-                            }
-                        },
-                        DiagnosticsEnabled = false,
-                        MaxQueuedRequestCount = 2000
-                    }
-                };
-
-                await config.ValidateAsync(ApplicationType.Server);
-
-                X509Certificate2 cert = await config.SecurityConfiguration.ApplicationCertificate.FindAsync(true);
-                if (cert == null)
-                {
-                    cert = CreateSelfSignedOpcCertificate(
-                        config.SecurityConfiguration.ApplicationCertificate.SubjectName,
-                        config.ApplicationUri,
-                        hostName
-                    );
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await _host.StopAsync(cts.Token);
+                    }).Wait(TimeSpan.FromSeconds(5));
                 }
-                config.SecurityConfiguration.ApplicationCertificate.Certificate = cert;
-
-                _opcApplication = new ApplicationInstance((ITelemetryContext)null!)
+                catch (Exception ex)
                 {
-                    ApplicationName = "VBMS_FDS_Server",
-                    ApplicationType = ApplicationType.Server,
-                    ApplicationConfiguration = config
-                };
-
-                await _opcApplication.StartAsync(opcServer);
+                    LogCrash("App OnExit 자원 정리 중 오류 발생", ex);
+                }
+                finally
+                {
+                    _host.Dispose();
+                    _host = null;
+                }
             }
-            catch (Exception ex)
+
+            // 뮤텍스 해제
+            if (_mutex != null)
             {
-                LogCrash("OPC UA 초기화 실패", ex);
+                try
+                {
+                    _mutex.ReleaseMutex();
+                    _mutex.Dispose();
+                }
+                catch { }
             }
-        }
 
-        private static X509Certificate2 CreateSelfSignedOpcCertificate(string subjectName, string applicationUri, string dnsName)
-        {
-            using (RSA rsa = RSA.Create(2048))
-            {
-                var request = new CertificateRequest(
-                    new X500DistinguishedName(subjectName),
-                    rsa,
-                    HashAlgorithmName.SHA256,
-                    RSASignaturePadding.Pkcs1);
-
-                // X500KeyUsageExtension -> X509KeyUsageExtension 으로 수정
-                request.CertificateExtensions.Add(
-                    new X509KeyUsageExtension(
-                        X509KeyUsageFlags.DigitalSignature |
-                        X509KeyUsageFlags.KeyEncipherment |
-                        X509KeyUsageFlags.DataEncipherment,
-                        true));
-
-                var sanBuilder = new SubjectAlternativeNameBuilder();
-                sanBuilder.AddUri(new Uri(applicationUri));
-                sanBuilder.AddDnsName(dnsName);
-                sanBuilder.AddDnsName("localhost");
-                request.CertificateExtensions.Add(sanBuilder.Build());
-
-                var cert = request.CreateSelfSigned(
-                    DateTimeOffset.UtcNow.AddDays(-1),
-                    DateTimeOffset.UtcNow.AddYears(2));
-
-                return new X509Certificate2(
-                    cert.Export(X509ContentType.Pfx),
-                    "",
-                    X509KeyStorageFlags.Exportable | X509KeyStorageFlags.PersistKeySet);
-            }
+            base.OnExit(e);
         }
 
         private void RegisterGlobalExceptionHandlers()
@@ -256,28 +177,11 @@ namespace VBMS
             try
             {
                 string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
-                string content = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{context}]\nMessage: {ex.Message}\nStackTrace:\n{ex.StackTrace}\n----------------------------------------\n";
+                // ex.ToString()을 사용하여 스택 트레이스 및 하위 예외(InnerException)까지 상세히 기록
+                string content = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{context}]\n{ex}\n----------------------------------------\n";
                 File.AppendAllText(logPath, content);
             }
             catch { }
-        }
-
-        protected override async void OnExit(ExitEventArgs e)
-        {
-            try
-            {
-                var storageService = _host?.Services.GetService<ITelemetryStorageService>();
-                if (storageService != null) await storageService.StopAsync();
-                if (_opcApplication != null) await _opcApplication.StopAsync();
-                if (_host != null)
-                {
-                    await _host.StopAsync(TimeSpan.FromSeconds(3));
-                    _host.Dispose();
-                }
-            }
-            catch { }
-
-            base.OnExit(e);
         }
     }
 }

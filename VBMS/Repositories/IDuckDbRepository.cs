@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using VBMS.Models;
 
 namespace VBMS.Repositories
@@ -68,9 +69,20 @@ namespace VBMS.Repositories
         void ArchiveAndPurgeOldData(DateTime archiveBeforeDate, string outputParquetPath);
 
         /// <summary>
+        /// 지정된 보존 기간(기본 7일)이 지난 detector_telemetry 원시 데이터를 삭제합니다.
+        /// </summary>
+        /// <param name="retentionDays">보존 일수 (기본값: 7일)</param>
+        void PurgeOldTelemetry(int retentionDays = 7);
+
+        /// <summary>
         /// 현재 DB에 저장된 총 로그 건수 조회 (요약 로그 / 원시 Dump 로그 / 이벤트 로그)
         /// </summary>
         (long SummaryCount, long DumpCount, long EventCount) GetLogCounts();
+
+        /// <summary>
+        /// 감지기 텔레메트리 데이터 대량(Batch) 비동기 저장
+        /// </summary>
+        Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries);
 
         #endregion
     }

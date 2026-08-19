@@ -1,18 +1,20 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using VBMS.Enums; // ⭐ [추가] AnomalyStatus Enum 참조
 using VBMS.Models;
+using VBMS.Repositories;
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
-using VBMS.Services.OpcUa; // ★ 검증/평가 서비스 네임스페이스 추가
+using VBMS.Services.OpcUa;
+using VBMS.Services.Storage;
 
 namespace VBMS.Services.Orchestrators
 {
-    /// <summary>
-    /// CRP 통신 서비스와 상위 뷰모델 간의 데이터 흐름과 비즈니스 로직을 조율하는 오케스트레이터 클래스입니다.
-    /// </summary>
     public class FdsDataOrchestrator : IFdsDataOrchestrator
     {
         private readonly ICrpCommunicationService _commService;
@@ -21,17 +23,21 @@ namespace VBMS.Services.Orchestrators
         private readonly FdsOptions _fdsOptions;
         private readonly IFireSignalEvaluator _signalEvaluator;
         private readonly IFireVerificationService _verificationService;
+        private readonly ITelemetryStorageService _telemetryStorageService;
+        private readonly IDetectorRepository _repository;
 
-        // 워치독 타이머 및 보드별 수신 시각/타임아웃 상태 관리
         private readonly ConcurrentDictionary<string, DateTime> _boardLastSeen = new();
         private readonly ConcurrentDictionary<string, bool> _boardTimeoutState = new();
         private readonly Timer _watchdogTimer;
-        private readonly TimeSpan _timeoutThreshold = TimeSpan.FromSeconds(10); // 10초 미수신 시 타임아웃
+        private readonly Timer _summaryTimer;
 
+        // 4초 간격 Summary 집계를 위해 데이터를 임시 보관하는 버퍼
+        private readonly ConcurrentBag<DetectorData> _summaryBuffer = new();
+
+        private readonly TimeSpan _timeoutThreshold = TimeSpan.FromSeconds(10);
         private bool _disposed = false;
 
         public event Action<CrpPacket>? OnPacketProcessed;
-        // ⭐ UI 셀(RackViewModel) 업데이트를 위해 bayOffset 정보를 함께 전달하는 이벤트 추가
         public event Action<int, CrpPacket>? OnPacketProcessedWithOffset;
         public event Action<bool>? OnConnectionChanged;
         public event Action<string, string>? OnLogMessage;
@@ -42,7 +48,9 @@ namespace VBMS.Services.Orchestrators
             IFdsMappingService mappingService,
             IOptions<FdsOptions> fdsOptions,
             IFireSignalEvaluator signalEvaluator,
-            IFireVerificationService verificationService)
+            IFireVerificationService verificationService,
+            ITelemetryStorageService telemetryStorageService,
+            IDetectorRepository repository)
         {
             _commService = commService ?? throw new ArgumentNullException(nameof(commService));
             _opcServer = opcServer ?? throw new ArgumentNullException(nameof(opcServer));
@@ -50,41 +58,35 @@ namespace VBMS.Services.Orchestrators
             _fdsOptions = fdsOptions?.Value ?? throw new ArgumentNullException(nameof(fdsOptions));
             _signalEvaluator = signalEvaluator ?? throw new ArgumentNullException(nameof(signalEvaluator));
             _verificationService = verificationService ?? throw new ArgumentNullException(nameof(verificationService));
+            _telemetryStorageService = telemetryStorageService ?? throw new ArgumentNullException(nameof(telemetryStorageService));
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
 
-            // 통신 서비스 이벤트 바인딩
             _commService.OnPacketReceived += HandlePacketReceived;
             _commService.OnConnectionChanged += HandleConnectionChanged;
             _commService.OnLogMessage += HandleLogMessage;
 
-            // 3초 주기 워치독 타이머 작동 (3초마다 보드별 타임아웃 감지)
             _watchdogTimer = new Timer(CheckBoardTimeouts, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+
+            // 4초 주기로 Summary 데이터를 집계하여 DB에 저장하는 타이머 작동
+            _summaryTimer = new Timer(ProcessSummaryLogs, null, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4));
         }
 
-        /// <summary>
-        /// 지정된 포트로 TCP 서버를 가동합니다.
-        /// </summary>
         public async Task StartServerAsync(int port)
         {
             await _commService.StartServerAsync(port);
         }
 
-        /// <summary>
-        /// 서버 연결을 해제하고 서비스를 중지합니다.
-        /// </summary>
         public void StopServer()
         {
             _commService.Disconnect();
         }
 
-        // 비동기 리셋 명령어 전송(await)을 위해 async void로 변경
         private async void HandlePacketReceived(CrpPacket packet)
         {
             if (packet != null && !string.IsNullOrEmpty(packet.Id))
             {
-                // 보드 수신 시간 기록
                 _boardLastSeen[packet.Id] = DateTime.Now;
 
-                // 기존에 복구되지 않았던 타임아웃 보드라면 통신 정상 복구 알림
                 if (_boardTimeoutState.TryGetValue(packet.Id, out bool isTimeout) && isTimeout)
                 {
                     _boardTimeoutState[packet.Id] = false;
@@ -94,33 +96,44 @@ namespace VBMS.Services.Orchestrators
 
             if (packet != null && packet.Detectors != null && packet.Detectors.Count > 0)
             {
-                // 패킷의 maxLine(보드당 연 수) 파싱 (기본값 16)
                 int maxLine = 16;
                 if (int.TryParse(packet.MaxLine, out int ml) && ml > 0)
                 {
                     maxLine = ml;
                 }
 
-                // appsettings.json 기반으로 보드 ID에 해당하는 레인 번호 및 Bay 오프셋 조회
                 if (_mappingService.TryGetBoardMapping(packet.Id, maxLine, out int lane, out int bayOffset))
                 {
-                    // OPC UA 서버가 구동되어 NodeManager가 생성되었는지 확인 후 업데이트
+                    int.TryParse(packet.Id, out int boardId);
+
+                    // 1. 각 감지기에 BoardId 채워주기 및 서머리 버퍼 수집
+                    foreach (var det in packet.Detectors)
+                    {
+                        det.BoardId = boardId;
+                        _summaryBuffer.Add(det);
+                    }
+
+                    // 2. 원시 텔레메트리 데이터 DB 수집 채널 밀어넣기
+                    _telemetryStorageService.EnqueueRange(packet.Detectors);
+
+                    // 3. OPC UA 서버 업데이트 및 이상징후/화재 검증 로직 실행
                     if (_opcServer.NodeManager != null)
                     {
-                        int.TryParse(packet.Id, out int boardId);
+                        var dumpList = new List<(DetectorData Data, DateTime ReceivedAt)>();
+                        DateTime now = DateTime.Now;
+
+                        // ⭐ [추가] 정상 작동 중인 유효 센서만으로 랙 평균 온도 산출 (0℃ 및 에러 상태 제외)
+                        var validDetectors = packet.Detectors.Where(d => d.Status < 3 && d.Temperature > 0).ToList();
+                        double rackAvgTemp = validDetectors.Count > 0 ? validDetectors.Average(d => d.Temperature) : 0;
 
                         foreach (var det in packet.Detectors)
                         {
-                            // ⭐ 각 감지기 객체에 파싱한 BoardId 대입 (UI 수동 리셋 커맨드 생성용)
-                            det.BoardId = boardId;
+                            // ⭐ [추가] 평균 온도 기반 사전 이상징후(DeltaTempWarning, AbsoluteTempWarning) 평가
+                            AnomalyStatus anomaly = _signalEvaluator.EvaluateAnomaly(det.Status, det.Temperature, rackAvgTemp);
 
-                            // 1. 상태/온도 기반 1차 신호 도출 (0: 정상, 1: 연기, 2: 온도)
                             uint rawSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
-
-                            // 2. 감지기 식별 키 생성
                             string detectorKey = $"Lane_{lane}_Bay_{det.Bay}_Level_{det.Level}";
 
-                            // 3. 개별 감지기 2회 리셋([001RSR1600]) 검증 처리
                             uint finalSignal = await _verificationService.VerifySignalAsync(
                                 detectorKey,
                                 rawSignal,
@@ -129,11 +142,28 @@ namespace VBMS.Services.Orchestrators
                                 det.Level
                             );
 
-                            // 4. 셀 좌표 계산 및 OPC UA 노드 개별 반영
+                            // ⭐ [수정] 화재 확정(finalSignal > 0)뿐만 아니라 사전 이상징후(편차 이상, 주의 온도) 감지 시에도 Dump 저장 대상 수집
+                            if (finalSignal > 0 || anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
+                            {
+                                dumpList.Add((det, now));
+
+                                // 이상징후 감지 시 시스템 로그 출력
+                                if (anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
+                                {
+                                    OnLogMessage?.Invoke($"[이상징후 감지] Board:{packet.Id}, Bay:{det.Bay}, LV:{det.Level}, 상태:{anomaly}, 현재온도:{det.Temperature}℃, 평균온도:{rackAvgTemp:F1}℃", "Warning");
+                                }
+                            }
+
                             int globalRow = (det.Bay - 1) + bayOffset;
                             int col = (det.Level >= 13) ? det.Level - 1 : det.Level;
 
                             _opcServer.NodeManager.UpdateRackCell(lane, globalRow, col, finalSignal);
+                        }
+
+                        // ⭐ [수정] 화재 및 이상 징후 감지 건이 있을 경우 Dump 데이터 일괄 DB 저장
+                        if (dumpList.Count > 0)
+                        {
+                            Task.Run(() => _repository.SaveDumpBatch(dumpList));
                         }
                     }
                     else
@@ -141,7 +171,6 @@ namespace VBMS.Services.Orchestrators
                         OnLogMessage?.Invoke("[WARN] OPC UA NodeManager가 아직 초기화되지 않았습니다.", "Warning");
                     }
 
-                    // ⭐ [추가] 매핑된 bayOffset 정보와 패킷을 UI(RackViewModel) 전달용 이벤트로 발송
                     OnPacketProcessedWithOffset?.Invoke(bayOffset, packet);
                 }
                 else
@@ -156,9 +185,56 @@ namespace VBMS.Services.Orchestrators
             }
         }
 
-        /// <summary>
-        /// 주기적으로 보드별 마지막 수신 시각을 확인하여 타임아웃 발생 시 장애 상태를 반영합니다.
-        /// </summary>
+        // 4초 주기 Summary 데이터 집계 및 저장 로직
+        private void ProcessSummaryLogs(object? state)
+        {
+            if (_summaryBuffer.IsEmpty) return;
+
+            var snapshot = _summaryBuffer.ToList();
+            _summaryBuffer.Clear();
+
+            if (snapshot.Count == 0) return;
+
+            var summaryList = snapshot
+                .GroupBy(d => d.BoardId)
+                .Select(g =>
+                {
+                    var firstData = g.First();
+                    string rackId = $"BAY{firstData.Bay:D2}_LV{firstData.Level:D2}";
+
+                    // 정상 작동 중인 유효 센서만 필터링 (에러 상태 제외 및 0℃ 초과 데이터)
+                    var validDetectors = g.Where(d => d.Status < 3 && d.Temperature > 0).ToList();
+
+                    // 만약 보드 내 모든 센서가 미연결/에러라면 0으로 처리, 유효 센서가 1개라도 있다면 유효 센서로만 집계
+                    double avgTemp = validDetectors.Count > 0 ? validDetectors.Average(d => d.Temperature) : 0;
+                    double maxTemp = validDetectors.Count > 0 ? validDetectors.Max(d => d.Temperature) : 0;
+                    double minTemp = validDetectors.Count > 0 ? validDetectors.Min(d => d.Temperature) : 0;
+
+                    double avgGas = validDetectors.Count > 0 ? validDetectors.Average(d => d.GasDensity) : 0;
+                    double maxGas = validDetectors.Count > 0 ? validDetectors.Max(d => d.GasDensity) : 0;
+
+                    return new CrpSummaryLog
+                    {
+                        Timestamp = DateTime.Now,
+                        BoardId = g.Key,
+                        RackId = rackId,
+                        AvgTemperature = Math.Round(avgTemp, 2),
+                        MaxTemperature = Math.Round(maxTemp, 2),
+                        MinTemperature = Math.Round(minTemp, 2),
+                        AvgGasLevel = Math.Round(avgGas, 2),
+                        MaxGasLevel = Math.Round(maxGas, 2),
+                        HasFireAlarm = g.Any(d => d.Status == 1 || d.Status == 2),
+                        HasSensorError = g.Any(d => d.Status >= 3)
+                    };
+                })
+                .ToList();
+
+            if (summaryList.Count > 0)
+            {
+                Task.Run(() => _repository.SaveSummaryBatch(summaryList));
+            }
+        }
+
         private void CheckBoardTimeouts(object? state)
         {
             DateTime now = DateTime.Now;
@@ -172,27 +248,23 @@ namespace VBMS.Services.Orchestrators
                 for (int i = 0; i < lane.BoardIds.Count; i++)
                 {
                     string boardId = lane.BoardIds[i];
-                    int bayOffset = i * 16; // CRP 1개당 16연 기준
+                    int bayOffset = i * 16;
 
-                    // 데이터를 수신한 적이 있고, 10초 이상 지난 경우
                     if (_boardLastSeen.TryGetValue(boardId, out DateTime lastSeen))
                     {
                         if (now - lastSeen > _timeoutThreshold)
                         {
                             bool alreadyTimeout = _boardTimeoutState.TryGetValue(boardId, out bool isT) && isT;
 
-                            // 최초 타임아웃 감지시에만 에러 처리 및 로그 실행
                             if (!alreadyTimeout)
                             {
                                 _boardTimeoutState[boardId] = true;
 
-                                // 1. OPC UA 노드 상 해당 영역 통신 장애(Signal = 3) 처리
                                 if (_opcServer.NodeManager != null)
                                 {
                                     _opcServer.NodeManager.SetBoardCommunicationFault(lane.LaneNumber, bayOffset, 16);
                                 }
 
-                                // 2. 로그 발생
                                 OnLogMessage?.Invoke($"[ERROR] CRP 보드 통신 두절 감지: Board ID = {boardId} (레인 {lane.LaneNumber}, 연 오프셋 {bayOffset})", "Error");
                             }
                         }
@@ -215,10 +287,9 @@ namespace VBMS.Services.Orchestrators
         {
             if (!_disposed)
             {
-                // 워치독 타이머 자원 해제
                 _watchdogTimer?.Dispose();
+                _summaryTimer?.Dispose();
 
-                // 이벤트 구독 해제 (메모리 누수 방지)
                 _commService.OnPacketReceived -= HandlePacketReceived;
                 _commService.OnConnectionChanged -= HandleConnectionChanged;
                 _commService.OnLogMessage -= HandleLogMessage;

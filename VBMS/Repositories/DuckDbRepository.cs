@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.Threading.Tasks;
 using VBMS.Models;
 
 namespace VBMS.Repositories
@@ -39,54 +40,67 @@ namespace VBMS.Repositories
                 using var conn = new DuckDBConnection(_connectionString);
                 conn.Open();
 
-                using var cmd = conn.CreateCommand();
-
                 // 1. 4초 주기 요약 테이블 생성
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS crp_summary_logs (
-                        timestamp TIMESTAMP,
-                        rack_id VARCHAR,
-                        board_id INTEGER,
-                        avg_temp DOUBLE,
-                        max_temp DOUBLE,
-                        min_temp DOUBLE,
-                        avg_gas DOUBLE,
-                        max_gas DOUBLE,
-                        has_fire_alarm BOOLEAN,
-                        has_sensor_error BOOLEAN
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_summary_time_rack ON crp_summary_logs (timestamp, rack_id);
-                ";
-                cmd.ExecuteNonQuery();
+                ExecuteQuery(conn, @"
+            CREATE TABLE IF NOT EXISTS crp_summary_logs (
+                timestamp TIMESTAMP,
+                rack_id VARCHAR,
+                board_id INTEGER,
+                avg_temp DOUBLE,
+                max_temp DOUBLE,
+                min_temp DOUBLE,
+                avg_gas DOUBLE,
+                max_gas DOUBLE,
+                has_fire_alarm BOOLEAN,
+                has_sensor_error BOOLEAN
+            );");
+                ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_summary_time_rack ON crp_summary_logs (timestamp, rack_id);");
 
                 // 2. 이상징후 Dump 데이터 테이블 생성
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS detector_dump_logs (
-                        received_at TIMESTAMP,
-                        rack_id VARCHAR,
-                        board_id INTEGER,
-                        temperature DOUBLE,
-                        gas_level DOUBLE,
-                        is_fire BOOLEAN,
-                        is_error BOOLEAN
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_dump_time ON detector_dump_logs (received_at);
-                ";
-                cmd.ExecuteNonQuery();
+                ExecuteQuery(conn, @"
+            CREATE TABLE IF NOT EXISTS detector_dump_logs (
+                received_at TIMESTAMP,
+                rack_id VARCHAR,
+                board_id INTEGER,
+                temperature DOUBLE,
+                gas_level DOUBLE,
+                is_fire BOOLEAN,
+                is_error BOOLEAN
+            );");
+                ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_dump_time ON detector_dump_logs (received_at);");
 
-                // 3. 이벤트/알람 로그 테이블 생성 (EventLogModel 연동)
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS event_logs (
-                        row_num INTEGER,
-                        bay_num INTEGER,
-                        level_num INTEGER,
-                        content VARCHAR,
-                        log_time TIMESTAMP
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_event_time ON event_logs (log_time);
-                ";
-                cmd.ExecuteNonQuery();
+                // 3. 이벤트/알람 로그 테이블 생성
+                ExecuteQuery(conn, @"
+            CREATE TABLE IF NOT EXISTS event_logs (
+                row_num INTEGER,
+                bay_num INTEGER,
+                level_num INTEGER,
+                content VARCHAR,
+                log_time TIMESTAMP
+            );");
+                ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_event_time ON event_logs (log_time);");
+
+                // 4. 텔레메트리 원시 데이터 테이블 생성 (InsertTelemetryBatchAsync용)
+                ExecuteQuery(conn, @"
+            CREATE TABLE IF NOT EXISTS detector_telemetry (
+                board_id INTEGER,
+                detector_index INTEGER,
+                bay INTEGER,
+                level INTEGER,
+                temperature DOUBLE,
+                gas_density DOUBLE,
+                status INTEGER,
+                created_at TIMESTAMP
+            );");
+                ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_telemetry_created ON detector_telemetry (created_at);");
             }
+        }
+
+        private static void ExecuteQuery(DuckDBConnection conn, string sql)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
         }
 
         #region [데이터 저장 구현]
@@ -391,6 +405,25 @@ namespace VBMS.Repositories
         }
 
         /// <summary>
+        /// 🌟 [추가됨] 지정된 보존 기간(기본 7일)이 지난 detector_telemetry 원시 데이터를 삭제합니다.
+        /// </summary>
+        public void PurgeOldTelemetry(int retentionDays = 7)
+        {
+            lock (_dbLock)
+            {
+                using var conn = new DuckDBConnection(_connectionString);
+                conn.Open();
+
+                DateTime cutoffTime = DateTime.Now.AddDays(-retentionDays);
+
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "DELETE FROM detector_telemetry WHERE created_at < $1;";
+                cmd.Parameters.Add(new DuckDBParameter(cutoffTime));
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
         /// 현재 DB 테이블별 로그 건수 산출
         /// </summary>
         public (long SummaryCount, long DumpCount, long EventCount) GetLogCounts()
@@ -414,6 +447,46 @@ namespace VBMS.Repositories
             cmd.CommandText = sql;
             object? res = cmd.ExecuteScalar();
             return res != null && res != DBNull.Value ? Convert.ToInt64(res) : 0L;
+        }
+
+        public async Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries)
+        {
+            using var connection = new DuckDBConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var transaction = await connection.BeginTransactionAsync();
+            try
+            {
+                var now = DateTime.Now;
+
+                foreach (var item in telemetries)
+                {
+                    using var command = connection.CreateCommand();
+
+                    command.CommandText = @"
+                        INSERT INTO detector_telemetry 
+                        (board_id, detector_index, bay, level, temperature, gas_density, status, created_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);";
+
+                    command.Parameters.Add(new DuckDBParameter(item.BoardId));
+                    command.Parameters.Add(new DuckDBParameter(item.Index));
+                    command.Parameters.Add(new DuckDBParameter(item.Bay));
+                    command.Parameters.Add(new DuckDBParameter(item.Level));
+                    command.Parameters.Add(new DuckDBParameter(item.Temperature));
+                    command.Parameters.Add(new DuckDBParameter(item.GasDensity));
+                    command.Parameters.Add(new DuckDBParameter(item.Status));
+                    command.Parameters.Add(new DuckDBParameter(now));
+
+                    await command.ExecuteNonQueryAsync();
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
 
         #endregion
