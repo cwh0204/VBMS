@@ -6,18 +6,20 @@ using Opc.Ua;
 using Opc.Ua.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using System.Windows;
 using VBMS.Models;
+using VBMS.Repositories;
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
 using VBMS.Services.OpcUa;
 using VBMS.Services.Orchestrators;
 using VBMS.Services.Parsers;
+using VBMS.Services.Storage;
 using VBMS.ViewModels;
 using VBMS.Views;
 
@@ -25,15 +27,17 @@ namespace VBMS
 {
     public partial class App : Application
     {
-        private readonly IHost _host;
+        private IHost? _host;
         private ApplicationInstance? _opcApplication;
 
-        // ⭐ [추가] 외부(RackViewModel 등)에서 App.Services 형태로 DI 컨테이너에 접근 가능하도록 설정
         public new static App Current => (App)Application.Current;
-        public static IServiceProvider Services => Current._host.Services;
+        public static IServiceProvider Services => Current._host!.Services;
 
         public App()
         {
+            // [중요] 앱 강제 종료(Crash) 시 원인을 catch하여 crash.log에 기록
+            RegisterGlobalExceptionHandlers();
+
             _host = Host.CreateDefaultBuilder()
                 .ConfigureAppConfiguration((hostingContext, config) =>
                 {
@@ -42,47 +46,67 @@ namespace VBMS
                 })
                 .ConfigureServices((context, services) =>
                 {
-                    // 1. 공통 및 옵션 설정
+                    services.AddSingleton<IDetectorRepository, DuckDbRepository>();
+                    services.AddSingleton<ITelemetryStorageService, TelemetryStorageService>();
+
                     services.AddSingleton<INotificationManager, NotificationManager>();
                     services.Configure<FdsOptions>(context.Configuration.GetSection("FdsConfig"));
 
-                    // 2. CRP 통신 및 매핑 데이터 파싱 서비스 (앱 전체 상태 공유를 위해 Singleton)
                     services.AddSingleton<IFdsMappingService, FdsMappingService>();
                     services.AddSingleton<ICrpCommunicationService, CrpCommunicationService>();
                     services.AddSingleton<ICrpDataParser, CrpDataParser>();
                     services.AddSingleton<IFdsDataOrchestrator, FdsDataOrchestrator>();
 
-                    // 3. 화재 판단 및 검증/쿨다운/수동리셋 통합 관리 서비스 (Singleton)
                     services.AddSingleton<IFireSignalEvaluator>(new FireSignalEvaluator(60.0));
                     services.AddSingleton<IFireVerificationService, FireVerificationService>();
 
-                    // 4. OPC UA 서버
                     services.AddSingleton<FdsOpcServer>();
 
-                    // 5. ViewModels
                     services.AddSingleton<MainWindowViewModel>();
-                    services.AddTransient<RackDetailViewModel>(); // 랙 상세 팝업용 ViewModel
+                    services.AddTransient<RackDetailViewModel>();
 
-                    // 6. Views / Windows
                     services.AddTransient<MainWindow>();
-                    services.AddTransient<RackDetailWindow>();    // 랙 상세 팝업 창
+                    services.AddTransient<RackDetailWindow>();
                 })
                 .Build();
         }
 
         protected override async void OnStartup(StartupEventArgs e)
         {
-            await _host.StartAsync();
+            base.OnStartup(e);
 
             try
             {
-                var opcServer = _host.Services.GetRequiredService<FdsOpcServer>();
+                // 1. UI 창 최우선 로딩
+                var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+                mainWindow.DataContext = _host.Services.GetRequiredService<MainWindowViewModel>();
+                mainWindow.Show();
+
+                // 2. 백그라운드 Host 시작
+                await _host.StartAsync();
+
+                // 3. 데이터 저장소 서비스 시작
+                var storageService = _host.Services.GetRequiredService<ITelemetryStorageService>();
+                storageService.Start();
+
+                // 4. OPC UA 서버 비동기 시작
+                InitializeOpcUaServer();
+            }
+            catch (Exception ex)
+            {
+                LogCrash("OnStartup 예외 발생", ex);
+                MessageBox.Show($"시작 중 오류 발생: {ex.Message}", "치명적 오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void InitializeOpcUaServer()
+        {
+            try
+            {
+                var opcServer = _host!.Services.GetRequiredService<FdsOpcServer>();
                 string hostName = System.Net.Dns.GetHostName();
 
-                var baseAddresses = new StringCollection
-                {
-                    "opc.tcp://0.0.0.0:4840/VBMS/FDS"
-                };
+                var baseAddresses = new StringCollection { "opc.tcp://0.0.0.0:4840/VBMS/FDS" };
 
                 var config = new ApplicationConfiguration()
                 {
@@ -143,7 +167,6 @@ namespace VBMS
 
                 await config.ValidateAsync(ApplicationType.Server);
 
-                // 인증서 검색 및 생성
                 X509Certificate2 cert = await config.SecurityConfiguration.ApplicationCertificate.FindAsync(true);
                 if (cert == null)
                 {
@@ -166,14 +189,8 @@ namespace VBMS
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"OPC UA 서버 시작 실패: {ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                LogCrash("OPC UA 초기화 실패", ex);
             }
-
-            var mainWindow = _host.Services.GetRequiredService<MainWindow>();
-            mainWindow.DataContext = _host.Services.GetRequiredService<MainWindowViewModel>();
-            mainWindow.Show();
-
-            base.OnStartup(e);
         }
 
         private static X509Certificate2 CreateSelfSignedOpcCertificate(string subjectName, string applicationUri, string dnsName)
@@ -186,12 +203,13 @@ namespace VBMS
                     HashAlgorithmName.SHA256,
                     RSASignaturePadding.Pkcs1);
 
+                // X500KeyUsageExtension -> X509KeyUsageExtension 으로 수정
                 request.CertificateExtensions.Add(
-                            new X509KeyUsageExtension(
-                                X509KeyUsageFlags.DigitalSignature |
-                                X509KeyUsageFlags.KeyEncipherment |
-                                X509KeyUsageFlags.DataEncipherment,
-                                true));
+                    new X509KeyUsageExtension(
+                        X509KeyUsageFlags.DigitalSignature |
+                        X509KeyUsageFlags.KeyEncipherment |
+                        X509KeyUsageFlags.DataEncipherment,
+                        true));
 
                 var sanBuilder = new SubjectAlternativeNameBuilder();
                 sanBuilder.AddUri(new Uri(applicationUri));
@@ -210,21 +228,54 @@ namespace VBMS
             }
         }
 
+        private void RegisterGlobalExceptionHandlers()
+        {
+            this.DispatcherUnhandledException += (s, e) =>
+            {
+                LogCrash("UI Thread Exception", e.Exception);
+                e.Handled = true;
+            };
+
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                if (e.ExceptionObject is Exception ex)
+                {
+                    LogCrash("AppDomain Unhandled Exception", ex);
+                }
+            };
+
+            TaskScheduler.UnobservedTaskException += (s, e) =>
+            {
+                LogCrash("TaskScheduler Unobserved Exception", e.Exception);
+                e.SetObserved();
+            };
+        }
+
+        private static void LogCrash(string context, Exception ex)
+        {
+            try
+            {
+                string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
+                string content = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{context}]\nMessage: {ex.Message}\nStackTrace:\n{ex.StackTrace}\n----------------------------------------\n";
+                File.AppendAllText(logPath, content);
+            }
+            catch { }
+        }
+
         protected override async void OnExit(ExitEventArgs e)
         {
             try
             {
-                if (_opcApplication != null)
+                var storageService = _host?.Services.GetService<ITelemetryStorageService>();
+                if (storageService != null) await storageService.StopAsync();
+                if (_opcApplication != null) await _opcApplication.StopAsync();
+                if (_host != null)
                 {
-                    await _opcApplication.StopAsync();
+                    await _host.StopAsync(TimeSpan.FromSeconds(3));
+                    _host.Dispose();
                 }
             }
             catch { }
-
-            using (_host)
-            {
-                await _host.StopAsync(TimeSpan.FromSeconds(5));
-            }
 
             base.OnExit(e);
         }
