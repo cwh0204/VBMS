@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using VBMS.Models;
+using VBMS.Repositories; // Repository 네임스페이스
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
 using VBMS.Services.Orchestrators;
@@ -21,6 +22,7 @@ namespace VBMS.ViewModels
         private readonly IFdsDataOrchestrator? _orchestrator;
         private readonly IFdsMappingService? _mappingService;
         private readonly IFireSignalEvaluator? _fireSignalEvaluator;
+        private readonly IDetectorRepository? _repository; // DB 저장용 Repository
 
         // UI 보드 수신 시각 및 위치 추적용
         private readonly ConcurrentDictionary<string, DateTime> _boardLastSeen = new();
@@ -60,11 +62,13 @@ namespace VBMS.ViewModels
         public MainWindowViewModel(
             IFdsDataOrchestrator orchestrator,
             IFdsMappingService mappingService,
-            IFireSignalEvaluator fireSignalEvaluator) : this()
+            IFireSignalEvaluator fireSignalEvaluator,
+            IDetectorRepository repository) : this() // Repository DI 주입
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
             _fireSignalEvaluator = fireSignalEvaluator ?? throw new ArgumentNullException(nameof(fireSignalEvaluator));
+            _repository = repository ?? throw new ArgumentNullException(nameof(repository));
 
             // 패킷 처리 완료 이벤트 구독
             _orchestrator.OnPacketProcessed += HandlePacketProcessed;
@@ -178,21 +182,18 @@ namespace VBMS.ViewModels
             // 상태가 변경되었을 때만 이벤트 로그 및 알람 발생 (도배 방지)
             if (currentStatusCategory != previousStatusCategory)
             {
+                Debug.WriteLine($"[STATUS CHANGE] 보드: {boardId}, 센서 #{detector.Index} | 이전: {previousStatusCategory} -> 변경: {currentStatusCategory}");
                 _detectorLastStatus[detectorKey] = currentStatusCategory;
 
                 switch (currentStatusCategory)
                 {
                     case 2: // 온도 화재
                         AddEventLog(lane, bay, level, $"[화재 감지] 고온 경보 발생! (센서 #{detector.Index}, 온도: {detector.Temperature}℃)");
-
-                        // ⭐ lane 변수로 정상 표기되도록 수정
                         ShowFireNotification("🚨 화재 발생", $"[ {rackName} ]\n열 : {lane}  연 : {bay}  단 : {level}\n온도 : {detector.Temperature}℃");
                         break;
 
                     case 1: // 연기 화재
                         AddEventLog(lane, bay, level, $"[연기 감지] 연기 신호 감지 (센서 #{detector.Index})");
-
-                        // ⭐ lane 변수로 정상 표기되도록 수정
                         ShowFireNotification("⚠️ 연기 감지", $"[ {rackName} ]\n열 : {lane}  연 : {bay}  단 : {level}");
                         break;
 
@@ -287,8 +288,15 @@ namespace VBMS.ViewModels
             dataInquiryWindow.Show();
         }
 
+        /// <summary>
+        /// UI 목록에 로그를 추가하고 DB에 비동기로 저장합니다. (디버그 로그 포함)
+        /// </summary>
         private void AddEventLog(int row, int bay, int level, string content)
         {
+            DateTime now = DateTime.Now;
+            Debug.WriteLine($"\n[LOG CALL] AddEventLog 호출됨 - 내용: {content}");
+
+            // [1] UI 화면 갱신 (WPF UI 스레드)
             Application.Current?.Dispatcher.InvokeAsync(() =>
             {
                 EventLogList.Insert(0, new EventLogModel
@@ -297,12 +305,33 @@ namespace VBMS.ViewModels
                     Bay = bay,
                     Level = level,
                     Content = content,
-                    DateTime = DateTime.Now.ToString("HH:mm:ss")
+                    DateTime = now.ToString("HH:mm:ss")
                 });
 
                 if (EventLogList.Count > 200)
                 {
                     EventLogList.RemoveAt(EventLogList.Count - 1);
+                }
+            });
+
+            // [2] DB 비동기 저장 (백그라운드 스레드)
+            if (_repository == null)
+            {
+                Debug.WriteLine("❌ [DB CRITICAL] _repository가 null입니다! DI 주입 설정을 확인하세요.");
+                return;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    Debug.WriteLine($"[DB TRY] DB 저장 시도 중... ({content})");
+                    await _repository.SaveEventLogAsync(row, bay, level, content, now).ConfigureAwait(false);
+                    Debug.WriteLine($"✅ [DB SUCCESS] DB 저장 완료: {content}\n");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"💥 [DB ERROR] 저장 실패 예외 발생: {ex.Message}\n");
                 }
             });
         }

@@ -84,6 +84,10 @@ namespace VBMS.Repositories
         /// </summary>
         Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries);
 
+        /// <summary>
+        /// 센서 상태 변화 및 시스템 이벤트 로그를 DB에 저장합니다.
+        /// </summary>
+        Task SaveEventLogAsync(int row, int bay, int level, string content, DateTime createdAt);
         #endregion
     }
 }

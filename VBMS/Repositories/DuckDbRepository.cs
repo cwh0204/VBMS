@@ -1,25 +1,26 @@
-﻿using DuckDB.NET.Data;
+﻿using Dapper;
+using DuckDB.NET.Data;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using VBMS.Models;
 
 namespace VBMS.Repositories
 {
-    public class DuckDbRepository : IDetectorRepository
+    public class DuckDbRepository : IDetectorRepository, IDisposable
     {
         private readonly string _connectionString;
-        private readonly object _dbLock = new object();
+        private readonly SemaphoreSlim _dbSemaphore = new SemaphoreSlim(1, 1);
+        private bool _disposed;
 
         public DuckDbRepository(IConfiguration configuration)
         {
-            // appsettings.json의 DbPath 설정 읽기 (기본값: Data/fds_data.duckdb)
             string dbPath = configuration["FdsConfig:DbPath"] ?? "Data/fds_data.duckdb";
 
-            // 데이터베이스 저장 폴더 자동 생성
             string? directory = Path.GetDirectoryName(dbPath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
             {
@@ -30,17 +31,20 @@ namespace VBMS.Repositories
             InitDatabase();
         }
 
-        /// <summary>
-        /// DuckDB 테이블, 인덱스 생성 및 초기화
-        /// </summary>
+        private DuckDBConnection CreateConnection()
+        {
+            return new DuckDBConnection(_connectionString);
+        }
+
         public void InitDatabase()
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
-                // 1. 4초 주기 요약 테이블 생성
+                // 1. 4초 주기 요약 테이블
                 ExecuteQuery(conn, @"
             CREATE TABLE IF NOT EXISTS crp_summary_logs (
                 timestamp TIMESTAMP,
@@ -56,7 +60,7 @@ namespace VBMS.Repositories
             );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_summary_time_rack ON crp_summary_logs (timestamp, rack_id);");
 
-                // 2. 이상징후 Dump 데이터 테이블 생성
+                // 2. 이상징후 Dump 데이터 테이블
                 ExecuteQuery(conn, @"
             CREATE TABLE IF NOT EXISTS detector_dump_logs (
                 received_at TIMESTAMP,
@@ -69,7 +73,7 @@ namespace VBMS.Repositories
             );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_dump_time ON detector_dump_logs (received_at);");
 
-                // 3. 이벤트/알람 로그 테이블 생성
+                // 3. 이벤트/알람 로그 테이블
                 ExecuteQuery(conn, @"
             CREATE TABLE IF NOT EXISTS event_logs (
                 row_num INTEGER,
@@ -80,7 +84,7 @@ namespace VBMS.Repositories
             );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_event_time ON event_logs (log_time);");
 
-                // 4. 텔레메트리 원시 데이터 테이블 생성 (InsertTelemetryBatchAsync용)
+                // 4. 텔레메트리 원시 데이터 테이블
                 ExecuteQuery(conn, @"
             CREATE TABLE IF NOT EXISTS detector_telemetry (
                 board_id INTEGER,
@@ -94,6 +98,10 @@ namespace VBMS.Repositories
             );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_telemetry_created ON detector_telemetry (created_at);");
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
         }
 
         private static void ExecuteQuery(DuckDBConnection conn, string sql)
@@ -103,94 +111,121 @@ namespace VBMS.Repositories
             cmd.ExecuteNonQuery();
         }
 
-        #region [데이터 저장 구현]
+        #region [데이터 저장 구현 - Appender 적용]
 
         /// <summary>
-        /// 4초 간격 주기 요약 데이터 일괄 저장
+        /// 4초 간격 주기 요약 데이터 Appender 일괄 저장
         /// </summary>
         public void SaveSummaryBatch(IEnumerable<CrpSummaryLog> summaryLogs)
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
-                using var tx = conn.BeginTransaction();
 
-                string sql = @"
-                    INSERT INTO crp_summary_logs 
-                    (timestamp, rack_id, board_id, avg_temp, max_temp, min_temp, avg_gas, max_gas, has_fire_alarm, has_sensor_error)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);";
-
+                using var appender = conn.CreateAppender("crp_summary_logs");
                 foreach (var log in summaryLogs)
                 {
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = sql;
-                    cmd.Parameters.Add(new DuckDBParameter(log.Timestamp));
-                    cmd.Parameters.Add(new DuckDBParameter(log.RackId));
-                    cmd.Parameters.Add(new DuckDBParameter(log.BoardId));
-                    cmd.Parameters.Add(new DuckDBParameter(log.AvgTemperature));
-                    cmd.Parameters.Add(new DuckDBParameter(log.MaxTemperature));
-                    cmd.Parameters.Add(new DuckDBParameter(log.MinTemperature));
-                    cmd.Parameters.Add(new DuckDBParameter(log.AvgGasLevel));
-                    cmd.Parameters.Add(new DuckDBParameter(log.MaxGasLevel));
-                    cmd.Parameters.Add(new DuckDBParameter(log.HasFireAlarm));
-                    cmd.Parameters.Add(new DuckDBParameter(log.HasSensorError));
-                    cmd.ExecuteNonQuery();
+                    var row = appender.CreateRow();
+                    row.AppendValue(log.Timestamp)
+                       .AppendValue(log.RackId)
+                       .AppendValue(log.BoardId)
+                       .AppendValue(log.AvgTemperature)
+                       .AppendValue(log.MaxTemperature)
+                       .AppendValue(log.MinTemperature)
+                       .AppendValue(log.AvgGasLevel)
+                       .AppendValue(log.MaxGasLevel)
+                       .AppendValue(log.HasFireAlarm)
+                       .AppendValue(log.HasSensorError);
+                    row.EndRow();
                 }
-
-                tx.Commit();
+            }
+            finally
+            {
+                _dbSemaphore.Release();
             }
         }
 
         /// <summary>
-        /// 이상징후 발생 시 링버퍼 정밀 Dump 데이터 일괄 저장
+        /// 이상징후 발생 시 링버퍼 정밀 Dump 데이터 Appender 일괄 저장
         /// </summary>
         public void SaveDumpBatch(IEnumerable<(DetectorData Data, DateTime ReceivedAt)> items)
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
-                using var tx = conn.BeginTransaction();
 
-                string sql = @"
-            INSERT INTO detector_dump_logs 
-            (received_at, rack_id, board_id, temperature, gas_level, is_fire, is_error)
-            VALUES ($1, $2, $3, $4, $5, $6, $7);";
-
+                using var appender = conn.CreateAppender("detector_dump_logs");
                 foreach (var item in items)
                 {
                     var data = item.Data;
-
-                    // 모델을 변경하지 않고 저장 시점에 파생 값 산출
                     string rackId = $"BAY{data.Bay:D2}_LV{data.Level:D2}";
-                    bool isFire = data.Status == 1 || data.Status == 2; // 또는 data.IsAlarm
+                    bool isFire = data.Status == 1 || data.Status == 2;
                     bool isError = data.Status >= 3;
 
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = sql;
-                    cmd.Parameters.Add(new DuckDBParameter(item.ReceivedAt));
-                    cmd.Parameters.Add(new DuckDBParameter(rackId));
-                    cmd.Parameters.Add(new DuckDBParameter(data.BoardId));
-                    cmd.Parameters.Add(new DuckDBParameter(data.Temperature));
-                    cmd.Parameters.Add(new DuckDBParameter(data.GasDensity)); // GasDensity 직접 사용
-                    cmd.Parameters.Add(new DuckDBParameter(isFire));
-                    cmd.Parameters.Add(new DuckDBParameter(isError));
-                    cmd.ExecuteNonQuery();
+                    var row = appender.CreateRow();
+                    row.AppendValue(item.ReceivedAt)
+                       .AppendValue(rackId)
+                       .AppendValue(data.BoardId)
+                       .AppendValue(data.Temperature)
+                       .AppendValue(data.GasDensity)
+                       .AppendValue(isFire)
+                       .AppendValue(isError);
+                    row.EndRow();
                 }
-
-                tx.Commit();
+            }
+            finally
+            {
+                _dbSemaphore.Release();
             }
         }
 
         /// <summary>
-        /// 이벤트 로그 저장 (EventLogModel)
+        /// 텔레메트리 원시 데이터 Appender 일괄 저장
+        /// </summary>
+        public async Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries)
+        {
+            await _dbSemaphore.WaitAsync();
+            try
+            {
+                using var connection = CreateConnection();
+                await connection.OpenAsync();
+
+                var now = DateTime.Now;
+                using var appender = connection.CreateAppender("detector_telemetry");
+
+                foreach (var item in telemetries)
+                {
+                    var row = appender.CreateRow();
+                    row.AppendValue(item.BoardId)
+                       .AppendValue(item.Index)
+                       .AppendValue(item.Bay)
+                       .AppendValue(item.Level)
+                       .AppendValue(item.Temperature)
+                       .AppendValue(item.GasDensity)
+                       .AppendValue(item.Status)
+                       .AppendValue(now);
+                    row.EndRow();
+                }
+            }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
+        }
+
+        /// <summary>
+        /// 단건 이벤트 로그 저장 (Dapper 활용)
         /// </summary>
         public void SaveEventLog(EventLogModel eventLog)
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 using var cmd = conn.CreateCommand();
@@ -207,22 +242,43 @@ namespace VBMS.Repositories
                 cmd.Parameters.Add(new DuckDBParameter(parsedTime));
                 cmd.ExecuteNonQuery();
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
+        }
+
+        public async Task SaveEventLogAsync(int row, int bay, int level, string content, DateTime now)
+        {
+            using var connection = new DuckDBConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+        INSERT INTO event_logs (row_num, bay_num, level_num, content, log_time)
+        VALUES ($1, $2, $3, $4, $5);";
+
+            command.Parameters.Add(new DuckDBParameter(row));
+            command.Parameters.Add(new DuckDBParameter(bay));
+            command.Parameters.Add(new DuckDBParameter(level));
+            command.Parameters.Add(new DuckDBParameter(content));
+            command.Parameters.Add(new DuckDBParameter(now));
+
+            await command.ExecuteNonQueryAsync();
         }
 
         #endregion
 
         #region [통계 및 시각화 조회 구현]
 
-        /// <summary>
-        /// 특정 기간 및 Rack의 4초 주기 요약 데이터 조회 (차트용)
-        /// </summary>
         public IEnumerable<CrpSummaryLog> GetSummaryLogs(string? rackId, DateTime startTime, DateTime endTime)
         {
             var list = new List<CrpSummaryLog>();
 
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 using var cmd = conn.CreateCommand();
@@ -263,20 +319,22 @@ namespace VBMS.Repositories
                     });
                 }
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
 
             return list;
         }
 
-        /// <summary>
-        /// 기간별 Rack 통계 데이터 집계 (최고/최저/평균 온도 및 가스 농도 등)
-        /// </summary>
         public IEnumerable<DetectorStatistics> GetStatistics(DateTime startTime, DateTime endTime, string? rackId = null)
         {
             var list = new List<DetectorStatistics>();
 
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 using var cmd = conn.CreateCommand();
@@ -325,20 +383,22 @@ namespace VBMS.Repositories
                     });
                 }
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
 
             return list;
         }
 
-        /// <summary>
-        /// 이벤트 로그 조회
-        /// </summary>
         public IEnumerable<EventLogModel> GetEventLogs(DateTime startTime, DateTime endTime)
         {
             var list = new List<EventLogModel>();
 
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 using var cmd = conn.CreateCommand();
@@ -364,6 +424,10 @@ namespace VBMS.Repositories
                     });
                 }
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
 
             return list;
         }
@@ -372,20 +436,16 @@ namespace VBMS.Repositories
 
         #region [데이터 관리 및 모니터링 구현]
 
-        /// <summary>
-        /// 과거 데이터를 ZSTD 압축 Parquet 파일로 내보낸 후 DB 삭제 (아카이빙)
-        /// </summary>
         public void ArchiveAndPurgeOldData(DateTime archiveBeforeDate, string outputParquetPath)
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
-                using var tx = conn.BeginTransaction();
 
                 string safePath = outputParquetPath.Replace("'", "''");
 
-                // 1. 요약 데이터 Parquet 저장 및 Purge
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.CommandText = $"COPY (SELECT * FROM crp_summary_logs WHERE timestamp < $1) TO '{safePath}' (FORMAT PARQUET, COMPRESSION ZSTD);";
@@ -399,19 +459,19 @@ namespace VBMS.Repositories
                     cmd.Parameters.Add(new DuckDBParameter(archiveBeforeDate));
                     cmd.ExecuteNonQuery();
                 }
-
-                tx.Commit();
+            }
+            finally
+            {
+                _dbSemaphore.Release();
             }
         }
 
-        /// <summary>
-        /// 🌟 [추가됨] 지정된 보존 기간(기본 7일)이 지난 detector_telemetry 원시 데이터를 삭제합니다.
-        /// </summary>
         public void PurgeOldTelemetry(int retentionDays = 7)
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 DateTime cutoffTime = DateTime.Now.AddDays(-retentionDays);
@@ -421,16 +481,18 @@ namespace VBMS.Repositories
                 cmd.Parameters.Add(new DuckDBParameter(cutoffTime));
                 cmd.ExecuteNonQuery();
             }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
         }
 
-        /// <summary>
-        /// 현재 DB 테이블별 로그 건수 산출
-        /// </summary>
         public (long SummaryCount, long DumpCount, long EventCount) GetLogCounts()
         {
-            lock (_dbLock)
+            _dbSemaphore.Wait();
+            try
             {
-                using var conn = new DuckDBConnection(_connectionString);
+                using var conn = CreateConnection();
                 conn.Open();
 
                 long summaryCount = ExecuteScalarCount(conn, "SELECT COUNT(*) FROM crp_summary_logs");
@@ -438,6 +500,10 @@ namespace VBMS.Repositories
                 long eventCount = ExecuteScalarCount(conn, "SELECT COUNT(*) FROM event_logs");
 
                 return (summaryCount, dumpCount, eventCount);
+            }
+            finally
+            {
+                _dbSemaphore.Release();
             }
         }
 
@@ -449,43 +515,12 @@ namespace VBMS.Repositories
             return res != null && res != DBNull.Value ? Convert.ToInt64(res) : 0L;
         }
 
-        public async Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries)
+        public void Dispose()
         {
-            using var connection = new DuckDBConnection(_connectionString);
-            await connection.OpenAsync();
-
-            using var transaction = await connection.BeginTransactionAsync();
-            try
+            if (!_disposed)
             {
-                var now = DateTime.Now;
-
-                foreach (var item in telemetries)
-                {
-                    using var command = connection.CreateCommand();
-
-                    command.CommandText = @"
-                        INSERT INTO detector_telemetry 
-                        (board_id, detector_index, bay, level, temperature, gas_density, status, created_at)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8);";
-
-                    command.Parameters.Add(new DuckDBParameter(item.BoardId));
-                    command.Parameters.Add(new DuckDBParameter(item.Index));
-                    command.Parameters.Add(new DuckDBParameter(item.Bay));
-                    command.Parameters.Add(new DuckDBParameter(item.Level));
-                    command.Parameters.Add(new DuckDBParameter(item.Temperature));
-                    command.Parameters.Add(new DuckDBParameter(item.GasDensity));
-                    command.Parameters.Add(new DuckDBParameter(item.Status));
-                    command.Parameters.Add(new DuckDBParameter(now));
-
-                    await command.ExecuteNonQueryAsync();
-                }
-
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
+                _dbSemaphore.Dispose();
+                _disposed = true;
             }
         }
 
