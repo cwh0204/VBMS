@@ -88,6 +88,11 @@ namespace VBMS.Repositories
         /// 센서 상태 변화 및 시스템 이벤트 로그를 DB에 저장합니다.
         /// </summary>
         Task SaveEventLogAsync(int row, int bay, int level, string content, DateTime createdAt);
+
+        /// <summary>
+        /// 이상징후 정밀 Dump 데이터 조회
+        /// </summary>
+        public IEnumerable<DetectorDumpLogModel> GetDumpLogs(DateTime startTime, DateTime endTime, string? rackId = null);
         #endregion
     }
 }

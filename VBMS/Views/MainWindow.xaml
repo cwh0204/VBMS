@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:VBMS.ViewModels"
         xmlns:components="clr-namespace:VBMS.Views.Components"
         xmlns:notifications="clr-namespace:Notification.Wpf.Controls;assembly=Notification.Wpf"
-    mc:Ignorable="d"
+        mc:Ignorable="d"
         Title="VBMS - 배터리 랙 통합 관제 시스템" Height="950" Width="1440"
         WindowState="Maximized"
         TextElement.Foreground="{DynamicResource MaterialDesignBody}"
@@ -18,11 +18,12 @@
         WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
-        <!-- ⭐ 이 ViewModel을 만나면 FireAlarmPopupView를 사용하라고 알려줌 -->
+        <!-- 이 ViewModel을 만나면 FireAlarmPopupView를 사용하라고 지정 -->
         <DataTemplate DataType="{x:Type vm:FireAlarmPopupViewModel}">
             <components:FireAlarmPopupView />
         </DataTemplate>
     </Window.Resources>
+
     <!-- 윈도우 데이터 컨텍스트에 뷰모델 할당 -->
     <Window.DataContext>
         <vm:MainWindowViewModel />
@@ -44,7 +45,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Test" FontSize="18" FontWeight="Bold" Foreground="#FFC107" Margin="0,0,4,0" VerticalAlignment="Center"/>
                     <TextBlock Text="VBMS" FontSize="14" FontWeight="Bold" Foreground="#333333" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="|   배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                    <TextBlock Text="|    배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
                 </StackPanel>
 
                 <!-- 우측 시계 및 버튼 -->
@@ -160,20 +161,13 @@
             </materialDesign:Card>
         </Grid>
 
-        <!-- ⭐ 라이브러리 없이 직접 만든 화재 알림 팝업 오버레이 레이어 -->
+        <!-- ⭐ 화재 알림 팝업 오버레이 레이어 (수정 완료) -->
         <ItemsControl ItemsSource="{Binding ActiveAlarms}"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
               Margin="0,20,0,0"
               Panel.ZIndex="999"
               Grid.RowSpan="2">
-            <!-- 팝업 목록 항목 템플릿 -->
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <!-- 직접 만든 팝업 View를 그대로 출력 (여백만 살짝 추가) -->
-                    <components:FireAlarmPopupView Margin="0,0,0,10"/>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
 
             <!-- 세로로 쌓이도록 패널 설정 -->
             <ItemsControl.ItemsPanel>
@@ -181,6 +175,13 @@
                     <StackPanel IsItemsHost="True"/>
                 </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
+
+            <!-- 팝업 목록 항목 템플릿 (Window.Resources에 등록된 DataTemplate 자동 매핑) -->
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <ContentPresenter Content="{Binding}" Margin="0,0,0,10"/>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
         </ItemsControl>
     </Grid>
 </Window>

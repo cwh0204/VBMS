@@ -466,6 +466,59 @@ namespace VBMS.Repositories
             }
         }
 
+        public IEnumerable<DetectorDumpLogModel> GetDumpLogs(DateTime startTime, DateTime endTime, string? rackId = null)
+        {
+            var list = new List<DetectorDumpLogModel>();
+
+            _dbSemaphore.Wait();
+            try
+            {
+                using var conn = CreateConnection();
+                conn.Open();
+
+                using var cmd = conn.CreateCommand();
+                string sql = @"
+            SELECT received_at, rack_id, board_id, temperature, gas_level, is_fire, is_error
+            FROM detector_dump_logs
+            WHERE received_at BETWEEN $1 AND $2";
+
+                if (!string.IsNullOrEmpty(rackId))
+                {
+                    sql += " AND rack_id = $3";
+                }
+                sql += " ORDER BY received_at DESC";
+
+                cmd.CommandText = sql;
+                cmd.Parameters.Add(new DuckDBParameter(startTime));
+                cmd.Parameters.Add(new DuckDBParameter(endTime));
+                if (!string.IsNullOrEmpty(rackId))
+                {
+                    cmd.Parameters.Add(new DuckDBParameter(rackId));
+                }
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    list.Add(new DetectorDumpLogModel
+                    {
+                        ReceivedAt = reader.GetDateTime(0),
+                        RackId = reader.GetString(1),
+                        BoardId = reader.GetInt32(2),
+                        Temperature = reader.GetDouble(3),
+                        GasLevel = reader.GetDouble(4),
+                        IsFire = reader.GetBoolean(5),
+                        IsError = reader.GetBoolean(6)
+                    });
+                }
+            }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
+
+            return list;
+        }
+
         public void PurgeOldTelemetry(int retentionDays = 7)
         {
             _dbSemaphore.Wait();

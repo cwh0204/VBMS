@@ -4,8 +4,8 @@
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
         xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF"
         Title="통계 및 이력 조회 (DATA INQUIRY)" 
-        Height="850" Width="1400"
-        MinHeight="700" MinWidth="1100"
+        Height="900" Width="1450"
+        MinHeight="750" MinWidth="1100"
         WindowStartupLocation="CenterOwner"
         Background="#F8FAFC">
 
@@ -57,31 +57,31 @@
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!-- Top Bar -->
+            <!-- Top Bar: 전체 날짜 및 조회 제어 -->
             <RowDefinition Height="1.2*"/>
-            <!-- Section 1: 차트 -->
+            <!-- Section 1: LiveCharts2 시계열/통계 차트 영역 -->
             <RowDefinition Height="1*"/>
-            <!-- Section 2 & 3: 로그 그리드 -->
+            <!-- Section 2 & 3: Event 로그 및 이상징후 덤프 로그 2분할 그리드 -->
         </Grid.RowDefinitions>
 
         <!-- ========================================================================= -->
-        <!-- Row 0: Top Bar -->
+        <!-- Row 0: Top Bar (통합 기간 검색 및 시계) -->
         <!-- ========================================================================= -->
         <Border Grid.Row="0" Background="#0F172A" CornerRadius="6" Padding="14,10" Margin="0,0,0,10">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <materialDesign:PackIcon Kind="ChartLine" Width="22" Height="22" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="데이터 조회 (DATA INQUIRY)" FontSize="16" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" Margin="0,0,30,0"/>
+                    <TextBlock Text="데이터 조회 (DATA INQUIRY)" FontSize="16" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" Margin="0,0,25,0"/>
 
-                    <TextBlock Text="날짜" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" FontSize="13"/>
-                    <DatePicker SelectedDate="{Binding ChartStartDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
+                    <TextBlock Text="조회 기간" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" FontSize="13"/>
+                    <DatePicker SelectedDate="{Binding GlobalStartDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
                     <TextBlock Text="~" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0" FontWeight="Bold"/>
-                    <DatePicker SelectedDate="{Binding ChartEndDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
+                    <DatePicker SelectedDate="{Binding GlobalEndDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
 
-                    <Button Command="{Binding SearchChartCommand}" Margin="12,0,0,0" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="32" Padding="16,0">
+                    <Button Command="{Binding SearchAllCommand}" Margin="12,0,0,0" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="32" Padding="16,0">
                         <StackPanel Orientation="Horizontal">
                             <materialDesign:PackIcon Kind="Magnify" Width="16" Height="16" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                            <TextBlock Text="검색" FontWeight="Bold"/>
+                            <TextBlock Text="전체 조회" FontWeight="Bold"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -94,7 +94,7 @@
         </Border>
 
         <!-- ========================================================================= -->
-        <!-- Row 1: Section 1 - LiveCharts2 그래프 교체 완료 영역 -->
+        <!-- Row 1: Section 1 - LiveCharts2 그래프 영역 (온도/가스 트렌드) -->
         <!-- ========================================================================= -->
         <Border Grid.Row="1" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12" Margin="0,0,0,10">
             <Grid>
@@ -105,10 +105,10 @@
 
                 <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
                     <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
-                    <TextBlock Text="1. 열별 평균온도" FontWeight="Bold" FontSize="14" Foreground="#0F172A"/>
+                    <TextBlock Text="1. 센서 모니터링 및 트렌드 분석 (Summary Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- 🌟 실제 LiveCharts2 그래프 바인딩 🌟 -->
+                <!-- LiveCharts2 카테시안 차트 바인딩 -->
                 <lvc:CartesianChart Grid.Row="1" 
                                     Series="{Binding TemperatureSeries}"
                                     XAxes="{Binding XAxes}"
@@ -118,7 +118,7 @@
         </Border>
 
         <!-- ========================================================================= -->
-        <!-- Row 2: Section 2 & 3 - Event / 화재보고 2분할 -->
+        <!-- Row 2: Section 2 & 3 - Event 로그 / 이상징후 덤프 로그 2분할 -->
         <!-- ========================================================================= -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
@@ -127,7 +127,7 @@
                 <ColumnDefinition Width="1*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 하단 좌측: Event 데이터 조회 -->
+            <!-- 하단 좌측: Event 데이터 조회 (이벤트/알람 로그) -->
             <Border Grid.Column="0" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -138,19 +138,19 @@
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
                         <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
-                        <TextBlock Text="2. Event 데이터 조회" FontWeight="Bold" FontSize="14" Foreground="#0F172A"/>
+                        <TextBlock Text="2. 이벤트 및 알람 이력 (Event Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
                         <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Foreground="#475569" FontWeight="SemiBold"/>
-                        <DatePicker SelectedDate="{Binding EventStartDate}" Width="110" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding EventStartDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
                         <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="#475569"/>
-                        <DatePicker SelectedDate="{Binding EventEndDate}" Width="110" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding EventEndDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
 
-                        <Button Command="{Binding SearchEventsCommand}" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="28" Padding="10,0" Margin="8,0,0,0" FontSize="11">
+                        <Button Command="{Binding SearchEventsCommand}" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="28" Padding="10,0" Margin="6,0,0,0" FontSize="11">
                             <TextBlock Text="검색"/>
                         </Button>
-                        <Button Command="{Binding ExportEventsExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="10,0" Margin="4,0,0,0" FontSize="11">
+                        <Button Command="{Binding ExportEventsExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="8,0" Margin="4,0,0,0" FontSize="11">
                             <TextBlock Text="엑셀 저장"/>
                         </Button>
                     </WrapPanel>
@@ -169,17 +169,17 @@
                               BorderThickness="1"
                               BorderBrush="#334155">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="시간" Binding="{Binding DateTime}" Width="140"/>
-                            <DataGridTextColumn Header="열" Binding="{Binding Row, StringFormat='상온 {0}'}" Width="80"/>
-                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="50"/>
-                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="50"/>
+                            <DataGridTextColumn Header="발생 시간" Binding="{Binding LogTime, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="140"/>
+                            <DataGridTextColumn Header="행" Binding="{Binding RowNum}" Width="45"/>
+                            <DataGridTextColumn Header="열" Binding="{Binding BayNum}" Width="45"/>
+                            <DataGridTextColumn Header="단" Binding="{Binding LevelNum}" Width="45"/>
                             <DataGridTextColumn Header="내용" Binding="{Binding Content}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </Border>
 
-            <!-- 하단 우측: 화재보고 데이터 조회 -->
+            <!-- 하단 우측: 이상징후 덤프 로그 (블랙박스 데이터) 조회 -->
             <Border Grid.Column="2" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -190,25 +190,25 @@
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
                         <Border Width="4" Height="16" Background="#EF4444" Margin="0,0,8,0" CornerRadius="2"/>
-                        <TextBlock Text="3. 화재보고 데이터 조회" FontWeight="Bold" FontSize="14" Foreground="#EF4444"/>
+                        <TextBlock Text="3. 이상징후 정밀 덤프 로그 (Detector Dump Logs)" FontWeight="Bold" FontSize="14" Foreground="#EF4444" VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
                         <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Foreground="#475569" FontWeight="SemiBold"/>
-                        <DatePicker SelectedDate="{Binding FireStartDate}" Width="110" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding DumpStartDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
                         <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="#475569"/>
-                        <DatePicker SelectedDate="{Binding FireEndDate}" Width="110" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <DatePicker SelectedDate="{Binding DumpEndDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
 
-                        <Button Command="{Binding SearchFireReportsCommand}" Background="#EF4444" BorderBrush="#EF4444" Foreground="White" Height="28" Padding="10,0" Margin="8,0,0,0" FontSize="11">
+                        <Button Command="{Binding SearchDumpLogsCommand}" Background="#EF4444" BorderBrush="#EF4444" Foreground="White" Height="28" Padding="10,0" Margin="6,0,0,0" FontSize="11">
                             <TextBlock Text="검색"/>
                         </Button>
-                        <Button Command="{Binding ExportFireReportsExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="10,0" Margin="4,0,0,0" FontSize="11">
+                        <Button Command="{Binding ExportDumpExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="8,0" Margin="4,0,0,0" FontSize="11">
                             <TextBlock Text="엑셀 저장"/>
                         </Button>
                     </WrapPanel>
 
                     <DataGrid Grid.Row="2" 
-                              ItemsSource="{Binding FireReports}" 
+                              ItemsSource="{Binding DumpLogs}" 
                               AutoGenerateColumns="False" 
                               IsReadOnly="True"
                               HeadersVisibility="Column"
@@ -221,11 +221,13 @@
                               BorderThickness="1"
                               BorderBrush="#334155">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="시간" Binding="{Binding DateTime}" Width="140"/>
-                            <DataGridTextColumn Header="열" Binding="{Binding Row, StringFormat='상온 {0}'}" Width="80"/>
-                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="50"/>
-                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="50"/>
-                            <DataGridTextColumn Header="내용" Binding="{Binding Content}" Width="*"/>
+                            <DataGridTextColumn Header="수신 시간" Binding="{Binding ReceivedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss.fff}}" Width="150"/>
+                            <DataGridTextColumn Header="랙 ID" Binding="{Binding RackId}" Width="100"/>
+                            <DataGridTextColumn Header="보드" Binding="{Binding BoardId}" Width="50"/>
+                            <DataGridTextColumn Header="온도(°C)" Binding="{Binding Temperature, StringFormat={}{0:N1}}" Width="70"/>
+                            <DataGridTextColumn Header="가스" Binding="{Binding GasLevel, StringFormat={}{0:N1}}" Width="60"/>
+                            <DataGridTextColumn Header="화재" Binding="{Binding IsFire}" Width="50"/>
+                            <DataGridTextColumn Header="에러" Binding="{Binding IsError}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

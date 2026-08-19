@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -279,9 +280,12 @@ namespace VBMS.ViewModels
         [RelayCommand]
         private void OpenDataInquiry()
         {
+            // ⭐ App.Current.Services 대신 App.Services로 직접 접근
+            var viewModel = App.Services.GetService<DataInquiryViewModel>();
+
             var dataInquiryWindow = new DataInquiryWindow
             {
-                DataContext = new DataInquiryViewModel(),
+                DataContext = viewModel,
                 Owner = Application.Current.MainWindow
             };
 
