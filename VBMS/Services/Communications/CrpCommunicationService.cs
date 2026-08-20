@@ -126,16 +126,41 @@ namespace VBMS.Services.Communications
                         string receivedChunk = Encoding.ASCII.GetString(buffer, 0, bytesRead);
                         rxBuffer.Append(receivedChunk);
 
-                        string currentData = rxBuffer.ToString();
-                        int startIndex = currentData.IndexOf('(');
-                        int endIndex = currentData.IndexOf(')');
-
-                        while (startIndex != -1 && endIndex != -1 && endIndex > startIndex)
+                        // 안전한 링버퍼 형태의 패킷 추출 루프
+                        while (true)
                         {
+                            string currentData = rxBuffer.ToString();
+                            int startIndex = currentData.IndexOf('(');
+
+                            // 버퍼 내에 시작 문자가 없으면 대기 (잘못된 찌꺼기 데이터는 버퍼 폭증 방지)
+                            if (startIndex == -1)
+                            {
+                                if (rxBuffer.Length > 8192) rxBuffer.Clear();
+                                break;
+                            }
+
+                            // '(' 앞의 불필요한 찌꺼기 데이터 즉시 제거
+                            if (startIndex > 0)
+                            {
+                                rxBuffer.Remove(0, startIndex);
+                                currentData = rxBuffer.ToString();
+                                startIndex = 0;
+                            }
+
+                            // '(' 이후의 종료 문자 ')' 위치 검색
+                            int endIndex = currentData.IndexOf(')', startIndex);
+
+                            // 아직 짝이 맞는 ')'가 들어오지 않았으면 다음 ReadAsync 대기
+                            if (endIndex == -1) break;
+
+                            // 완전한 패킷 추출
                             string fullPacket = currentData.Substring(startIndex, endIndex - startIndex + 1);
 
-                            CrpPacket? packet = _crpDataParser.Parse(fullPacket);
+                            // 처리할 패킷 구간을 버퍼에서 즉시 제거
+                            rxBuffer.Remove(0, endIndex + 1);
 
+                            // 패킷 해석 처리
+                            CrpPacket? packet = _crpDataParser.Parse(fullPacket);
                             Log($"[{clientEndpoint}] {fullPacket}", "RX");
 
                             if (packet != null)
@@ -161,12 +186,6 @@ namespace VBMS.Services.Communications
                             {
                                 Log($"[{clientEndpoint}] 규격에 맞지 않는 패킷 구조입니다.", "ERR");
                             }
-
-                            rxBuffer.Remove(0, endIndex + 1);
-
-                            currentData = rxBuffer.ToString();
-                            startIndex = currentData.IndexOf('(');
-                            endIndex = currentData.IndexOf(')');
                         }
                     }
                 }

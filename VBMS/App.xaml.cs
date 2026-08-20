@@ -68,9 +68,13 @@ namespace VBMS
                     // UI ViewModels & Windows
                     services.AddSingleton<MainWindowViewModel>();
                     services.AddTransient<RackDetailViewModel>();
+                    services.AddTransient<DataInquiryViewModel>();
+
 
                     services.AddTransient<MainWindow>();
                     services.AddTransient<RackDetailWindow>();
+                    services.AddTransient<DataInquiryWindow>();
+
                 })
                 .Build();
         }

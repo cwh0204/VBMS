@@ -12,6 +12,8 @@
         public double Temperature { get; set; } // 온도 (ttt / 10.0)
         public int GasDensity { get; set; }     // 가스농도 (hh)
         public int Status { get; set; }          // 상태 (d)
+        public int DetectorIndex { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
 
         public string StatusText => Status switch
         {

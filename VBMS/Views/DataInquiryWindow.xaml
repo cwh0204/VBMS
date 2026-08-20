@@ -57,16 +57,11 @@
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!-- Top Bar: 전체 날짜 및 조회 제어 -->
             <RowDefinition Height="1.2*"/>
-            <!-- Section 1: LiveCharts2 시계열/통계 차트 영역 -->
             <RowDefinition Height="1*"/>
-            <!-- Section 2 & 3: Event 로그 및 이상징후 덤프 로그 2분할 그리드 -->
         </Grid.RowDefinitions>
 
-        <!-- ========================================================================= -->
-        <!-- Row 0: Top Bar (통합 기간 검색 및 시계) -->
-        <!-- ========================================================================= -->
+        <!-- Row 0: Top Bar -->
         <Border Grid.Row="0" Background="#0F172A" CornerRadius="6" Padding="14,10" Margin="0,0,0,10">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
@@ -93,9 +88,7 @@
             </DockPanel>
         </Border>
 
-        <!-- ========================================================================= -->
-        <!-- Row 1: Section 1 - LiveCharts2 그래프 영역 (온도/가스 트렌드) -->
-        <!-- ========================================================================= -->
+        <!-- Row 1: Section 1 - LiveCharts2 라인 그래프 영역 -->
         <Border Grid.Row="1" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
@@ -103,12 +96,28 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                    <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
-                    <TextBlock Text="1. 센서 모니터링 및 트렌드 분석 (Summary Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
-                </StackPanel>
+                <!-- 차트 타이틀 및 시간별/일별 선택 라디오 버튼 -->
+                <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                        <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
+                        <TextBlock Text="1. 센서 모니터링 및 트렌드 분석 (Summary Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
+                    </StackPanel>
 
-                <!-- LiveCharts2 카테시안 차트 바인딩 -->
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <RadioButton Content="시간별" 
+                                     IsChecked="{Binding IsHourlySelected}" 
+                                     GroupName="ChartInterval" 
+                                     Margin="0,0,12,0" 
+                                     FontWeight="SemiBold" 
+                                     Foreground="#334155"/>
+                        <RadioButton Content="일별" 
+                                     IsChecked="{Binding IsDailySelected}" 
+                                     GroupName="ChartInterval" 
+                                     FontWeight="SemiBold" 
+                                     Foreground="#334155"/>
+                    </StackPanel>
+                </DockPanel>
+
                 <lvc:CartesianChart Grid.Row="1" 
                                     Series="{Binding TemperatureSeries}"
                                     XAxes="{Binding XAxes}"
@@ -117,9 +126,7 @@
             </Grid>
         </Border>
 
-        <!-- ========================================================================= -->
-        <!-- Row 2: Section 2 & 3 - Event 로그 / 이상징후 덤프 로그 2분할 -->
-        <!-- ========================================================================= -->
+        <!-- Row 2: Section 2 & 3 - 2분할 그리드 -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1*"/>
@@ -127,7 +134,7 @@
                 <ColumnDefinition Width="1*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 하단 좌측: Event 데이터 조회 (이벤트/알람 로그) -->
+            <!-- 하단 좌측: Event 로그 -->
             <Border Grid.Column="0" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -169,17 +176,17 @@
                               BorderThickness="1"
                               BorderBrush="#334155">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="발생 시간" Binding="{Binding LogTime, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="140"/>
-                            <DataGridTextColumn Header="행" Binding="{Binding RowNum}" Width="45"/>
-                            <DataGridTextColumn Header="열" Binding="{Binding BayNum}" Width="45"/>
-                            <DataGridTextColumn Header="단" Binding="{Binding LevelNum}" Width="45"/>
+                            <DataGridTextColumn Header="발생 시간" Binding="{Binding DateTime, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="140"/>
+                            <DataGridTextColumn Header="보드" Binding="{Binding Row}" Width="60"/>
+                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="60"/>
+                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="60"/>
                             <DataGridTextColumn Header="내용" Binding="{Binding Content}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </Border>
 
-            <!-- 하단 우측: 이상징후 덤프 로그 (블랙박스 데이터) 조회 -->
+            <!-- 하단 우측: 이상징후 정밀 덤프 로그 -->
             <Border Grid.Column="2" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -222,12 +229,12 @@
                               BorderBrush="#334155">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="수신 시간" Binding="{Binding ReceivedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss.fff}}" Width="150"/>
-                            <DataGridTextColumn Header="랙 ID" Binding="{Binding RackId}" Width="100"/>
-                            <DataGridTextColumn Header="보드" Binding="{Binding BoardId}" Width="50"/>
+                            <DataGridTextColumn Header="보드" Binding="{Binding Row}" Width="50"/>
+                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="50"/>
+                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="50"/>
                             <DataGridTextColumn Header="온도(°C)" Binding="{Binding Temperature, StringFormat={}{0:N1}}" Width="70"/>
-                            <DataGridTextColumn Header="가스" Binding="{Binding GasLevel, StringFormat={}{0:N1}}" Width="60"/>
                             <DataGridTextColumn Header="화재" Binding="{Binding IsFire}" Width="50"/>
-                            <DataGridTextColumn Header="에러" Binding="{Binding IsError}" Width="*"/>
+                            <DataGridTextColumn Header="오류" Binding="{Binding IsError}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

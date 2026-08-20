@@ -3,8 +3,8 @@ using DuckDB.NET.Data;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VBMS.Models;
@@ -14,12 +14,13 @@ namespace VBMS.Repositories
     public class DuckDbRepository : IDetectorRepository, IDisposable
     {
         private readonly string _connectionString;
-        private readonly SemaphoreSlim _dbSemaphore = new SemaphoreSlim(1, 1);
+        private static readonly SemaphoreSlim _dbSemaphore = new SemaphoreSlim(1, 1);
         private bool _disposed;
 
         public DuckDbRepository(IConfiguration configuration)
         {
-            string dbPath = configuration["FdsConfig:DbPath"] ?? "Data/fds_data.duckdb";
+            string rawDbPath = configuration["FdsConfig:DbPath"] ?? "Data/fds_data.duckdb";
+            string dbPath = Path.GetFullPath(rawDbPath);
 
             string? directory = Path.GetDirectoryName(dbPath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -44,58 +45,52 @@ namespace VBMS.Repositories
                 using var conn = CreateConnection();
                 conn.Open();
 
-                // 1. 4초 주기 요약 테이블
                 ExecuteQuery(conn, @"
-            CREATE TABLE IF NOT EXISTS crp_summary_logs (
-                timestamp TIMESTAMP,
-                rack_id VARCHAR,
-                board_id INTEGER,
-                avg_temp DOUBLE,
-                max_temp DOUBLE,
-                min_temp DOUBLE,
-                avg_gas DOUBLE,
-                max_gas DOUBLE,
-                has_fire_alarm BOOLEAN,
-                has_sensor_error BOOLEAN
-            );");
+                CREATE TABLE IF NOT EXISTS crp_summary_logs (
+                    timestamp TIMESTAMP,
+                    rack_id VARCHAR,
+                    board_id INTEGER,
+                    avg_temp DOUBLE,
+                    max_temp DOUBLE,
+                    min_temp DOUBLE,
+                    has_fire_alarm BOOLEAN,
+                    has_sensor_error BOOLEAN
+                );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_summary_time_rack ON crp_summary_logs (timestamp, rack_id);");
 
-                // 2. 이상징후 Dump 데이터 테이블
                 ExecuteQuery(conn, @"
-            CREATE TABLE IF NOT EXISTS detector_dump_logs (
-                received_at TIMESTAMP,
-                rack_id VARCHAR,
-                board_id INTEGER,
-                temperature DOUBLE,
-                gas_level DOUBLE,
-                is_fire BOOLEAN,
-                is_error BOOLEAN
-            );");
+                CREATE TABLE IF NOT EXISTS detector_dump_logs (
+                    received_at TIMESTAMP,
+                    bay INTEGER,
+                    level INTEGER,
+                    row_num INTEGER,
+                    temperature DOUBLE,
+                    is_fire BOOLEAN,
+                    is_error BOOLEAN
+                );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_dump_time ON detector_dump_logs (received_at);");
 
-                // 3. 이벤트/알람 로그 테이블
                 ExecuteQuery(conn, @"
-            CREATE TABLE IF NOT EXISTS event_logs (
-                row_num INTEGER,
-                bay_num INTEGER,
-                level_num INTEGER,
-                content VARCHAR,
-                log_time TIMESTAMP
-            );");
+                CREATE TABLE IF NOT EXISTS event_logs (
+                    row_num INTEGER,
+                    bay_num INTEGER,
+                    level_num INTEGER,
+                    content VARCHAR,
+                    log_time TIMESTAMP
+                );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_event_time ON event_logs (log_time);");
 
-                // 4. 텔레메트리 원시 데이터 테이블
                 ExecuteQuery(conn, @"
-            CREATE TABLE IF NOT EXISTS detector_telemetry (
-                board_id INTEGER,
-                detector_index INTEGER,
-                bay INTEGER,
-                level INTEGER,
-                temperature DOUBLE,
-                gas_density DOUBLE,
-                status INTEGER,
-                created_at TIMESTAMP
-            );");
+                CREATE TABLE IF NOT EXISTS detector_telemetry (
+                    board_id INTEGER,
+                    detector_index INTEGER,
+                    bay INTEGER,
+                    level INTEGER,
+                    temperature DOUBLE,
+                    gas_density DOUBLE,
+                    status INTEGER,
+                    created_at TIMESTAMP
+                );");
                 ExecuteQuery(conn, "CREATE INDEX IF NOT EXISTS idx_telemetry_created ON detector_telemetry (created_at);");
             }
             finally
@@ -111,11 +106,8 @@ namespace VBMS.Repositories
             cmd.ExecuteNonQuery();
         }
 
-        #region [데이터 저장 구현 - Appender 적용]
+        #region [데이터 저장 구현]
 
-        /// <summary>
-        /// 4초 간격 주기 요약 데이터 Appender 일괄 저장
-        /// </summary>
         public void SaveSummaryBatch(IEnumerable<CrpSummaryLog> summaryLogs)
         {
             _dbSemaphore.Wait();
@@ -123,23 +115,10 @@ namespace VBMS.Repositories
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                using var appender = conn.CreateAppender("crp_summary_logs");
-                foreach (var log in summaryLogs)
-                {
-                    var row = appender.CreateRow();
-                    row.AppendValue(log.Timestamp)
-                       .AppendValue(log.RackId)
-                       .AppendValue(log.BoardId)
-                       .AppendValue(log.AvgTemperature)
-                       .AppendValue(log.MaxTemperature)
-                       .AppendValue(log.MinTemperature)
-                       .AppendValue(log.AvgGasLevel)
-                       .AppendValue(log.MaxGasLevel)
-                       .AppendValue(log.HasFireAlarm)
-                       .AppendValue(log.HasSensorError);
-                    row.EndRow();
-                }
+                string sql = @"
+                    INSERT INTO crp_summary_logs (timestamp, rack_id, board_id, avg_temp, max_temp, min_temp, has_fire_alarm, has_sensor_error)
+                    VALUES ($Timestamp, $RackId, $BoardId, $AvgTemperature, $MaxTemperature, $MinTemperature, $HasFireAlarm, $HasSensorError);";
+                conn.Execute(sql, summaryLogs);
             }
             finally
             {
@@ -147,9 +126,6 @@ namespace VBMS.Repositories
             }
         }
 
-        /// <summary>
-        /// 이상징후 발생 시 링버퍼 정밀 Dump 데이터 Appender 일괄 저장
-        /// </summary>
         public void SaveDumpBatch(IEnumerable<(DetectorData Data, DateTime ReceivedAt)> items)
         {
             _dbSemaphore.Wait();
@@ -158,24 +134,21 @@ namespace VBMS.Repositories
                 using var conn = CreateConnection();
                 conn.Open();
 
-                using var appender = conn.CreateAppender("detector_dump_logs");
-                foreach (var item in items)
+                var paramsList = items.Select(x => new
                 {
-                    var data = item.Data;
-                    string rackId = $"BAY{data.Bay:D2}_LV{data.Level:D2}";
-                    bool isFire = data.Status == 1 || data.Status == 2;
-                    bool isError = data.Status >= 3;
+                    ReceivedAt = x.ReceivedAt,
+                    Bay = x.Data.Bay,
+                    Level = x.Data.Level,
+                    Row = x.Data.BoardId,
+                    Temperature = x.Data.Temperature,
+                    IsFire = (x.Data.Status & 0x01) != 0,
+                    IsError = (x.Data.Status & 0x02) != 0
+                });
 
-                    var row = appender.CreateRow();
-                    row.AppendValue(item.ReceivedAt)
-                       .AppendValue(rackId)
-                       .AppendValue(data.BoardId)
-                       .AppendValue(data.Temperature)
-                       .AppendValue(data.GasDensity)
-                       .AppendValue(isFire)
-                       .AppendValue(isError);
-                    row.EndRow();
-                }
+                string sql = @"
+                    INSERT INTO detector_dump_logs (received_at, bay, level, row_num, temperature, is_fire, is_error)
+                    VALUES ($ReceivedAt, $Bay, $Level, $Row, $Temperature, $IsFire, $IsError);";
+                conn.Execute(sql, paramsList);
             }
             finally
             {
@@ -183,33 +156,32 @@ namespace VBMS.Repositories
             }
         }
 
-        /// <summary>
-        /// 텔레메트리 원시 데이터 Appender 일괄 저장
-        /// </summary>
         public async Task InsertTelemetryBatchAsync(IEnumerable<DetectorData> telemetries)
         {
             await _dbSemaphore.WaitAsync();
             try
             {
-                using var connection = CreateConnection();
-                await connection.OpenAsync();
+                using var conn = CreateConnection();
+                await conn.OpenAsync();
 
-                var now = DateTime.Now;
-                using var appender = connection.CreateAppender("detector_telemetry");
-
-                foreach (var item in telemetries)
+                // DetectorData에 없는 항목은 기본값(0 및 현재시간)으로 대체하여 8개 매개변수 충족
+                var paramList = telemetries.Select(x => new
                 {
-                    var row = appender.CreateRow();
-                    row.AppendValue(item.BoardId)
-                       .AppendValue(item.Index)
-                       .AppendValue(item.Bay)
-                       .AppendValue(item.Level)
-                       .AppendValue(item.Temperature)
-                       .AppendValue(item.GasDensity)
-                       .AppendValue(item.Status)
-                       .AppendValue(now);
-                    row.EndRow();
-                }
+                    BoardId = x.BoardId,
+                    DetectorIndex = 0,               // DetectorData에 속성이 없으므로 기본값 0 지정
+                    Bay = x.Bay,
+                    Level = x.Level,
+                    Temperature = x.Temperature,
+                    GasDensity = x.GasDensity,
+                    Status = x.Status,
+                    CreatedAt = DateTime.Now         // 현재 시각 저장
+                });
+
+                string sql = @"
+            INSERT INTO detector_telemetry (board_id, detector_index, bay, level, temperature, gas_density, status, created_at)
+            VALUES ($BoardId, $DetectorIndex, $Bay, $Level, $Temperature, $GasDensity, $Status, $CreatedAt);";
+
+                await conn.ExecuteAsync(sql, paramList);
             }
             finally
             {
@@ -217,9 +189,6 @@ namespace VBMS.Repositories
             }
         }
 
-        /// <summary>
-        /// 단건 이벤트 로그 저장 (Dapper 활용)
-        /// </summary>
         public void SaveEventLog(EventLogModel eventLog)
         {
             _dbSemaphore.Wait();
@@ -227,20 +196,10 @@ namespace VBMS.Repositories
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
+                string sql = @"
                     INSERT INTO event_logs (row_num, bay_num, level_num, content, log_time)
-                    VALUES ($1, $2, $3, $4, $5);";
-
-                DateTime parsedTime = DateTime.TryParse(eventLog.DateTime, out var dt) ? dt : DateTime.Now;
-
-                cmd.Parameters.Add(new DuckDBParameter(eventLog.Row));
-                cmd.Parameters.Add(new DuckDBParameter(eventLog.Bay));
-                cmd.Parameters.Add(new DuckDBParameter(eventLog.Level));
-                cmd.Parameters.Add(new DuckDBParameter(eventLog.Content));
-                cmd.Parameters.Add(new DuckDBParameter(parsedTime));
-                cmd.ExecuteNonQuery();
+                    VALUES ($Row, $Bay, $Level, $Content, $DateTime);";
+                conn.Execute(sql, eventLog);
             }
             finally
             {
@@ -250,21 +209,20 @@ namespace VBMS.Repositories
 
         public async Task SaveEventLogAsync(int row, int bay, int level, string content, DateTime now)
         {
-            using var connection = new DuckDBConnection(_connectionString);
-            await connection.OpenAsync();
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"
-        INSERT INTO event_logs (row_num, bay_num, level_num, content, log_time)
-        VALUES ($1, $2, $3, $4, $5);";
-
-            command.Parameters.Add(new DuckDBParameter(row));
-            command.Parameters.Add(new DuckDBParameter(bay));
-            command.Parameters.Add(new DuckDBParameter(level));
-            command.Parameters.Add(new DuckDBParameter(content));
-            command.Parameters.Add(new DuckDBParameter(now));
-
-            await command.ExecuteNonQueryAsync();
+            await _dbSemaphore.WaitAsync();
+            try
+            {
+                using var conn = CreateConnection();
+                await conn.OpenAsync();
+                string sql = @"
+                    INSERT INTO event_logs (row_num, bay_num, level_num, content, log_time)
+                    VALUES ($Row, $Bay, $Level, $Content, $LogTime);";
+                await conn.ExecuteAsync(sql, new { Row = row, Bay = bay, Level = level, Content = content, LogTime = now });
+            }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
         }
 
         #endregion
@@ -273,163 +231,95 @@ namespace VBMS.Repositories
 
         public IEnumerable<CrpSummaryLog> GetSummaryLogs(string? rackId, DateTime startTime, DateTime endTime)
         {
-            var list = new List<CrpSummaryLog>();
-
             _dbSemaphore.Wait();
             try
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                using var cmd = conn.CreateCommand();
                 string sql = @"
-                    SELECT timestamp, rack_id, board_id, avg_temp, max_temp, min_temp, avg_gas, max_gas, has_fire_alarm, has_sensor_error
+                    SELECT timestamp AS Timestamp, rack_id AS RackId, board_id AS BoardId,
+                           avg_temp AS AvgTemperature, max_temp AS MaxTemperature, min_temp AS MinTemperature,
+                           has_fire_alarm AS HasFireAlarm, has_sensor_error AS HasSensorError
                     FROM crp_summary_logs
-                    WHERE timestamp BETWEEN $1 AND $2";
-
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    sql += " AND rack_id = $3";
-                }
-                sql += " ORDER BY timestamp ASC";
-
-                cmd.CommandText = sql;
-                cmd.Parameters.Add(new DuckDBParameter(startTime));
-                cmd.Parameters.Add(new DuckDBParameter(endTime));
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    cmd.Parameters.Add(new DuckDBParameter(rackId));
-                }
-
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new CrpSummaryLog
-                    {
-                        Timestamp = reader.GetDateTime(0),
-                        RackId = reader.GetString(1),
-                        BoardId = reader.GetInt32(2),
-                        AvgTemperature = reader.GetDouble(3),
-                        MaxTemperature = reader.GetDouble(4),
-                        MinTemperature = reader.GetDouble(5),
-                        AvgGasLevel = reader.GetDouble(6),
-                        MaxGasLevel = reader.GetDouble(7),
-                        HasFireAlarm = reader.GetBoolean(8),
-                        HasSensorError = reader.GetBoolean(9)
-                    });
-                }
+                    WHERE timestamp BETWEEN $StartTime AND $EndTime
+                      AND ($RackId IS NULL OR rack_id = $RackId)
+                    ORDER BY timestamp ASC";
+                return conn.Query<CrpSummaryLog>(sql, new { StartTime = startTime, EndTime = endTime, RackId = rackId });
             }
             finally
             {
                 _dbSemaphore.Release();
             }
-
-            return list;
         }
 
         public IEnumerable<DetectorStatistics> GetStatistics(DateTime startTime, DateTime endTime, string? rackId = null)
         {
-            var list = new List<DetectorStatistics>();
-
             _dbSemaphore.Wait();
             try
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                using var cmd = conn.CreateCommand();
                 string sql = @"
                     SELECT 
-                        rack_id,
-                        MIN(timestamp) AS period_start,
-                        MAX(timestamp) AS period_end,
-                        AVG(avg_temp) AS avg_temp,
-                        MAX(max_temp) AS max_temp,
-                        MIN(min_temp) AS min_temp,
-                        MAX(max_gas) AS max_gas,
-                        SUM(CASE WHEN has_fire_alarm THEN 1 ELSE 0 END) AS total_fire,
-                        SUM(CASE WHEN has_sensor_error THEN 1 ELSE 0 END) AS total_error
+                        rack_id AS RackId,
+                        AVG(avg_temp) AS AvgTemperature,
+                        MAX(max_temp) AS MaxTemperature,
+                        MIN(min_temp) AS MinTemperature,
+                        COUNT(CASE WHEN has_fire_alarm = true THEN 1 END) AS FireAlarmCount,
+                        COUNT(CASE WHEN has_sensor_error = true THEN 1 END) AS SensorErrorCount
                     FROM crp_summary_logs
-                    WHERE timestamp BETWEEN $1 AND $2";
+                    WHERE timestamp BETWEEN $StartTime AND $EndTime
+                      AND ($RackId IS NULL OR rack_id = $RackId)
+                    GROUP BY rack_id";
 
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    sql += " AND rack_id = $3";
-                }
-                sql += " GROUP BY rack_id ORDER BY rack_id";
-
-                cmd.CommandText = sql;
-                cmd.Parameters.Add(new DuckDBParameter(startTime));
-                cmd.Parameters.Add(new DuckDBParameter(endTime));
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    cmd.Parameters.Add(new DuckDBParameter(rackId));
-                }
-
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new DetectorStatistics
-                    {
-                        RackId = reader.GetString(0),
-                        PeriodStart = reader.IsDBNull(1) ? startTime : reader.GetDateTime(1),
-                        PeriodEnd = reader.IsDBNull(2) ? endTime : reader.GetDateTime(2),
-                        AvgTemperature = reader.IsDBNull(3) ? 0.0 : reader.GetDouble(3),
-                        MaxTemperature = reader.IsDBNull(4) ? 0.0 : reader.GetDouble(4),
-                        MinTemperature = reader.IsDBNull(5) ? 0.0 : reader.GetDouble(5),
-                        MaxGasLevel = reader.IsDBNull(6) ? 0.0 : reader.GetDouble(6),
-                        TotalFireEvents = reader.IsDBNull(7) ? 0 : Convert.ToInt32(reader.GetValue(7)),
-                        TotalSensorErrors = reader.IsDBNull(8) ? 0 : Convert.ToInt32(reader.GetValue(8))
-                    });
-                }
+                return conn.Query<DetectorStatistics>(sql, new { StartTime = startTime, EndTime = endTime, RackId = rackId });
             }
             finally
             {
                 _dbSemaphore.Release();
             }
-
-            return list;
         }
 
         public IEnumerable<EventLogModel> GetEventLogs(DateTime startTime, DateTime endTime)
         {
-            var list = new List<EventLogModel>();
-
             _dbSemaphore.Wait();
             try
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"
-                    SELECT row_num, bay_num, level_num, content, log_time
+                string sql = @"
+                    SELECT row_num AS Row, bay_num AS Bay, level_num AS Level, content AS Content, log_time AS DateTime
                     FROM event_logs
-                    WHERE log_time BETWEEN $1 AND $2
+                    WHERE log_time BETWEEN $StartTime AND $EndTime
                     ORDER BY log_time DESC";
 
-                cmd.Parameters.Add(new DuckDBParameter(startTime));
-                cmd.Parameters.Add(new DuckDBParameter(endTime));
-
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new EventLogModel
-                    {
-                        Row = reader.GetInt32(0),
-                        Bay = reader.GetInt32(1),
-                        Level = reader.GetInt32(2),
-                        Content = reader.GetString(3),
-                        DateTime = reader.GetDateTime(4).ToString("yyyy-MM-dd HH:mm:ss")
-                    });
-                }
+                return conn.Query<EventLogModel>(sql, new { StartTime = startTime, EndTime = endTime });
             }
             finally
             {
                 _dbSemaphore.Release();
             }
+        }
 
-            return list;
+        public IEnumerable<DetectorDumpLogModel> GetDumpLogs(DateTime startTime, DateTime endTime, string? rackId = null)
+        {
+            _dbSemaphore.Wait();
+            try
+            {
+                using var conn = CreateConnection();
+                conn.Open();
+                string sql = @"
+                    SELECT received_at AS ReceivedAt, bay AS Bay, level AS Level, row_num AS Row,
+                           temperature AS Temperature, is_fire AS IsFire, is_error AS IsError
+                    FROM detector_dump_logs
+                    WHERE received_at BETWEEN $StartTime AND $EndTime
+                    ORDER BY received_at DESC";
+                return conn.Query<DetectorDumpLogModel>(sql, new { StartTime = startTime, EndTime = endTime });
+            }
+            finally
+            {
+                _dbSemaphore.Release();
+            }
         }
 
         #endregion
@@ -444,12 +334,12 @@ namespace VBMS.Repositories
                 using var conn = CreateConnection();
                 conn.Open();
 
-                string safePath = outputParquetPath.Replace("'", "''");
+                string safePath = outputParquetPath.Replace("\\", "/").Replace("'", "''");
+                string formattedDate = archiveBeforeDate.ToString("yyyy-MM-dd HH:mm:ss");
 
                 using (var cmd = conn.CreateCommand())
                 {
-                    cmd.CommandText = $"COPY (SELECT * FROM crp_summary_logs WHERE timestamp < $1) TO '{safePath}' (FORMAT PARQUET, COMPRESSION ZSTD);";
-                    cmd.Parameters.Add(new DuckDBParameter(archiveBeforeDate));
+                    cmd.CommandText = $"COPY (SELECT * FROM crp_summary_logs WHERE timestamp < '{formattedDate}') TO '{safePath}' (FORMAT PARQUET, COMPRESSION ZSTD);";
                     cmd.ExecuteNonQuery();
                 }
 
@@ -466,59 +356,6 @@ namespace VBMS.Repositories
             }
         }
 
-        public IEnumerable<DetectorDumpLogModel> GetDumpLogs(DateTime startTime, DateTime endTime, string? rackId = null)
-        {
-            var list = new List<DetectorDumpLogModel>();
-
-            _dbSemaphore.Wait();
-            try
-            {
-                using var conn = CreateConnection();
-                conn.Open();
-
-                using var cmd = conn.CreateCommand();
-                string sql = @"
-            SELECT received_at, rack_id, board_id, temperature, gas_level, is_fire, is_error
-            FROM detector_dump_logs
-            WHERE received_at BETWEEN $1 AND $2";
-
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    sql += " AND rack_id = $3";
-                }
-                sql += " ORDER BY received_at DESC";
-
-                cmd.CommandText = sql;
-                cmd.Parameters.Add(new DuckDBParameter(startTime));
-                cmd.Parameters.Add(new DuckDBParameter(endTime));
-                if (!string.IsNullOrEmpty(rackId))
-                {
-                    cmd.Parameters.Add(new DuckDBParameter(rackId));
-                }
-
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    list.Add(new DetectorDumpLogModel
-                    {
-                        ReceivedAt = reader.GetDateTime(0),
-                        RackId = reader.GetString(1),
-                        BoardId = reader.GetInt32(2),
-                        Temperature = reader.GetDouble(3),
-                        GasLevel = reader.GetDouble(4),
-                        IsFire = reader.GetBoolean(5),
-                        IsError = reader.GetBoolean(6)
-                    });
-                }
-            }
-            finally
-            {
-                _dbSemaphore.Release();
-            }
-
-            return list;
-        }
-
         public void PurgeOldTelemetry(int retentionDays = 7)
         {
             _dbSemaphore.Wait();
@@ -526,13 +363,9 @@ namespace VBMS.Repositories
             {
                 using var conn = CreateConnection();
                 conn.Open();
-
-                DateTime cutoffTime = DateTime.Now.AddDays(-retentionDays);
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "DELETE FROM detector_telemetry WHERE created_at < $1;";
-                cmd.Parameters.Add(new DuckDBParameter(cutoffTime));
-                cmd.ExecuteNonQuery();
+                DateTime cutoff = DateTime.Now.AddDays(-retentionDays);
+                string sql = "DELETE FROM detector_telemetry WHERE created_at < $Cutoff;";
+                conn.Execute(sql, new { Cutoff = cutoff });
             }
             finally
             {
@@ -547,12 +380,13 @@ namespace VBMS.Repositories
             {
                 using var conn = CreateConnection();
                 conn.Open();
+                string sql = @"
+                    SELECT 
+                        (SELECT COUNT(*) FROM crp_summary_logs) AS SummaryCount,
+                        (SELECT COUNT(*) FROM detector_dump_logs) AS DumpCount,
+                        (SELECT COUNT(*) FROM event_logs) AS EventCount";
 
-                long summaryCount = ExecuteScalarCount(conn, "SELECT COUNT(*) FROM crp_summary_logs");
-                long dumpCount = ExecuteScalarCount(conn, "SELECT COUNT(*) FROM detector_dump_logs");
-                long eventCount = ExecuteScalarCount(conn, "SELECT COUNT(*) FROM event_logs");
-
-                return (summaryCount, dumpCount, eventCount);
+                return conn.QueryFirstOrDefault<(long SummaryCount, long DumpCount, long EventCount)>(sql);
             }
             finally
             {
@@ -560,23 +394,14 @@ namespace VBMS.Repositories
             }
         }
 
-        private static long ExecuteScalarCount(DuckDBConnection conn, string sql)
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = sql;
-            object? res = cmd.ExecuteScalar();
-            return res != null && res != DBNull.Value ? Convert.ToInt64(res) : 0L;
-        }
+        #endregion
 
         public void Dispose()
         {
             if (!_disposed)
             {
-                _dbSemaphore.Dispose();
                 _disposed = true;
             }
         }
-
-        #endregion
     }
 }

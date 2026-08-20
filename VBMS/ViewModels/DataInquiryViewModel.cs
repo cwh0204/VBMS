@@ -1,47 +1,91 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Windows.Threading;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 using VBMS.Models;
-using VBMS.Repositories; // IDetectorRepository 사용을 위한 네임스페이스
-// LiveCharts2 네임스페이스
+using VBMS.Repositories;
 using LiveChartsCore;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
 using SkiaSharp;
-using System.Linq;
 
 namespace VBMS.ViewModels
 {
-    public partial class DataInquiryViewModel : ObservableObject
+    public partial class DataInquiryViewModel : ObservableObject, IDisposable
     {
         private readonly IDetectorRepository _detectorRepository;
+        private readonly DispatcherTimer _timer;
+        private bool _disposed;
 
         // ==========================================
-        // 0. 날짜 검색 프로퍼티 (상단 통합 및 개별 섹션)
+        // 0. 로딩 상태 및 날짜 검색 프로퍼티
         // ==========================================
+        [ObservableProperty]
+        private bool _isLoading;
+
         [ObservableProperty]
         private DateTime _globalStartDate = DateTime.Now.Date;
 
         [ObservableProperty]
-        private DateTime _globalEndDate = DateTime.Now.Date.AddDays(1).AddSeconds(-1); // 당일 23:59:59까지 기본 설정
+        private DateTime _globalEndDate = DateTime.Now.Date;
 
         [ObservableProperty]
         private DateTime _eventStartDate = DateTime.Now.Date;
 
         [ObservableProperty]
-        private DateTime _eventEndDate = DateTime.Now.Date.AddDays(1).AddSeconds(-1);
+        private DateTime _eventEndDate = DateTime.Now.Date;
 
         [ObservableProperty]
         private DateTime _dumpStartDate = DateTime.Now.Date;
 
         [ObservableProperty]
-        private DateTime _dumpEndDate = DateTime.Now.Date.AddDays(1).AddSeconds(-1);
+        private DateTime _dumpEndDate = DateTime.Now.Date;
 
         // ==========================================
-        // 1. 차트 영역 (Summary Logs)
+        // 1. 차트 단위 선택 프로퍼티 (시간별 / 일별)
+        // [ObservableProperty] 대신 명시적 속성을 사용하여 Source Generator 오류 방지
+        // ==========================================
+        private bool _isHourlySelected = true;
+        public bool IsHourlySelected
+        {
+            get => _isHourlySelected;
+            set
+            {
+                if (SetProperty(ref _isHourlySelected, value))
+                {
+                    if (value)
+                    {
+                        IsDailySelected = false;
+                        _ = LoadChartDataFromDbAsync(GetStartOfDay(GlobalStartDate), GetEndOfDay(GlobalEndDate));
+                    }
+                }
+            }
+        }
+
+        private bool _isDailySelected;
+        public bool IsDailySelected
+        {
+            get => _isDailySelected;
+            set
+            {
+                if (SetProperty(ref _isDailySelected, value))
+                {
+                    if (value)
+                    {
+                        IsHourlySelected = false;
+                        _ = LoadChartDataFromDbAsync(GetStartOfDay(GlobalStartDate), GetEndOfDay(GlobalEndDate));
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 2. 차트 영역 (Summary Logs)
         // ==========================================
         private ISeries[] _temperatureSeries = Array.Empty<ISeries>();
         public ISeries[] TemperatureSeries
@@ -65,28 +109,20 @@ namespace VBMS.ViewModels
         }
 
         // ==========================================
-        // 2. Event 영역 (Event Logs)
+        // 3. 데이터 목록 영역
         // ==========================================
         [ObservableProperty]
         private ObservableCollection<EventLogModel> _eventLogs = new();
 
-        // ==========================================
-        // 3. 이상징후 덤프 로그 영역 (Detector Dump Logs)
-        // ==========================================
         [ObservableProperty]
         private ObservableCollection<DetectorDumpLogModel> _dumpLogs = new();
 
         // ==========================================
-        // 4. 실시간 시계 프로퍼티 및 타이머
+        // 4. 실시간 시계 프로퍼티
         // ==========================================
         [ObservableProperty]
         private string _currentTimeString = DateTime.Now.ToString("HH:mm:ss");
 
-        private readonly DispatcherTimer _timer;
-
-        // ==========================================
-        // 5. 생성자 (의존성 주입을 통해 리포지토리 받기)
-        // ==========================================
         public DataInquiryViewModel(IDetectorRepository detectorRepository)
         {
             _detectorRepository = detectorRepository ?? throw new ArgumentNullException(nameof(detectorRepository));
@@ -98,74 +134,112 @@ namespace VBMS.ViewModels
             _timer.Tick += (s, e) => CurrentTimeString = DateTime.Now.ToString("HH:mm:ss");
             _timer.Start();
 
-            // 초기 데이터 로드
-            LoadAllDataFromDatabase();
+            _ = LoadAllDataFromDatabaseAsync();
         }
 
         // ==========================================
-        // 6. 커맨드 및 데이터베이스 조회 메서드들
+        // 헬퍼 메서드: 종료 날짜를 해당 일자의 23:59:59로 보정
+        // ==========================================
+        private static DateTime GetStartOfDay(DateTime date) => date.Date;
+        private static DateTime GetEndOfDay(DateTime date) => date.Date.AddDays(1).AddSeconds(-1);
+
+        // ==========================================
+        // 5. 비동기 커맨드 및 데이터베이스 조회 메서드
         // ==========================================
 
-        /// <summary>
-        /// 상단 [전체 조회] 버튼 커맨드
-        /// </summary>
         [RelayCommand]
-        private void SearchAll()
+        private async Task SearchAllAsync()
         {
             EventStartDate = GlobalStartDate;
             EventEndDate = GlobalEndDate;
             DumpStartDate = GlobalStartDate;
             DumpEndDate = GlobalEndDate;
 
-            LoadAllDataFromDatabase();
+            await LoadAllDataFromDatabaseAsync();
         }
 
-        private void LoadAllDataFromDatabase()
+        private async Task LoadAllDataFromDatabaseAsync()
         {
+            if (IsLoading) return;
+
             try
             {
-                System.Diagnostics.Debug.WriteLine($"[DEBUG] 전체 데이터 조회 시작 - 기간: {GlobalStartDate} ~ {GlobalEndDate}");
+                IsLoading = true;
 
-                LoadChartDataFromDb(GlobalStartDate, GlobalEndDate);
-                LoadEventLogsFromDb(EventStartDate, EventEndDate);
-                LoadDumpLogsFromDb(DumpStartDate, DumpEndDate);
+                DateTime start = GetStartOfDay(GlobalStartDate);
+                DateTime end = GetEndOfDay(GlobalEndDate);
+
+                await LoadChartDataFromDbAsync(start, end);
+                await LoadEventLogsFromDbAsync(GetStartOfDay(EventStartDate), GetEndOfDay(EventEndDate));
+                await LoadDumpLogsFromDbAsync(GetStartOfDay(DumpStartDate), GetEndOfDay(DumpEndDate));
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[DEBUG ERROR] LoadAllDataFromDatabase 예외 발생: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] LoadAllDataFromDatabaseAsync: {ex.Message}");
                 MessageBox.Show($"데이터 조회 중 오류가 발생했습니다: {ex.Message}", "데이터베이스 오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsLoading = false;
             }
         }
 
-        /// <summary>
-        /// 요약 테이블(crp_summary_logs) 데이터를 조회하여 LiveCharts2 시각화 바인딩
-        /// </summary>
-        private void LoadChartDataFromDb(DateTime start, DateTime end)
+        private async Task LoadChartDataFromDbAsync(DateTime start, DateTime end)
         {
-            var summaryLogs = _detectorRepository.GetSummaryLogs(null, start, end).ToList();
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] SummaryLogs 조회 개수: {summaryLogs.Count}");
+            var summaryLogs = await Task.Run(() =>
+                _detectorRepository.GetSummaryLogs(null, start, end)
+                                   .OrderBy(x => x.Timestamp)
+                                   .ToList());
 
             if (summaryLogs.Count == 0)
             {
                 TemperatureSeries = Array.Empty<ISeries>();
-                XAxes = new Axis[] { new Axis { Name = "시간", Labels = Array.Empty<string>(), TextSize = 12 } };
+                XAxes = new Axis[] { new Axis { Name = "시간", TextSize = 12 } };
                 YAxes = new Axis[] { new Axis { Name = "온도 (°C)", TextSize = 12 } };
                 return;
             }
 
-            // 시간순 정렬 후 X축 레이블 및 Y축(평균 온도) 값 추출
-            var times = summaryLogs.Select(x => x.Timestamp.ToString("HH:mm:ss")).ToArray();
-            var temperatures = summaryLogs.Select(x => x.AvgTemperature).ToArray();
+            var groupedData = IsHourlySelected
+                ? summaryLogs
+                    .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, 0, 0))
+                    .Select(g => new
+                    {
+                        Label = g.Key.ToString("MM/dd HH:00"),
+                        AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
+                        MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
+                    })
+                    .OrderBy(x => x.Label)
+                    .ToList()
+                : summaryLogs
+                    .GroupBy(x => x.Timestamp.Date)
+                    .Select(g => new
+                    {
+                        Label = g.Key.ToString("yyyy-MM-dd"),
+                        AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
+                        MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
+                    })
+                    .OrderBy(x => x.Label)
+                    .ToList();
 
             TemperatureSeries = new ISeries[]
             {
                 new LineSeries<double>
                 {
-                    Name = "평균 온도",
-                    Values = temperatures,
-                    Stroke = new SolidColorPaint(SKColors.DodgerBlue, 2),
+                    Name = "평균 온도 (°C)",
+                    Values = groupedData.Select(x => x.AvgTemp).ToArray(),
+                    Stroke = new SolidColorPaint(SKColors.DodgerBlue, 2.5f),
                     Fill = null,
-                    GeometrySize = 4
+                    GeometrySize = groupedData.Count > 150 ? 0 : 5,
+                    GeometryStroke = new SolidColorPaint(SKColors.DodgerBlue, 2.5f)
+                },
+                new LineSeries<double>
+                {
+                    Name = "최고 온도 (°C)",
+                    Values = groupedData.Select(x => x.MaxTemp).ToArray(),
+                    Stroke = new SolidColorPaint(SKColors.Tomato, 2.5f),
+                    Fill = null,
+                    GeometrySize = groupedData.Count > 150 ? 0 : 5,
+                    GeometryStroke = new SolidColorPaint(SKColors.Tomato, 2.5f)
                 }
             };
 
@@ -173,10 +247,11 @@ namespace VBMS.ViewModels
             {
                 new Axis
                 {
-                    Name = "시간",
-                    Labels = times,
+                    Name = IsHourlySelected ? "시간 단위 (HH:00)" : "일자 단위 (YYYY-MM-DD)",
+                    Labels = groupedData.Select(x => x.Label).ToArray(),
                     TextSize = 12,
-                    LabelsRotation = 15
+                    LabelsRotation = 15,
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(50))
                 }
             };
 
@@ -185,53 +260,53 @@ namespace VBMS.ViewModels
                 new Axis
                 {
                     Name = "온도 (°C)",
-                    TextSize = 12
+                    Labeler = val => $"{val:N1} °C",
+                    TextSize = 12,
+                    SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(50))
                 }
             };
         }
 
         [RelayCommand]
-        private void SearchEvents()
+        private async Task SearchEventsAsync()
         {
-            LoadEventLogsFromDb(EventStartDate, EventEndDate);
+            if (IsLoading) return;
+            try
+            {
+                IsLoading = true;
+                await LoadEventLogsFromDbAsync(GetStartOfDay(EventStartDate), GetEndOfDay(EventEndDate));
+            }
+            finally
+            {
+                IsLoading = false;
+            }
         }
 
-        /// <summary>
-        /// 이벤트 로그 테이블(event_logs) 조회 연동
-        /// </summary>
-        private void LoadEventLogsFromDb(DateTime start, DateTime end)
+        private async Task LoadEventLogsFromDbAsync(DateTime start, DateTime end)
         {
-            EventLogs.Clear();
-
-            var logs = _detectorRepository.GetEventLogs(start, end).ToList();
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] EventLogs 조회 개수: {logs.Count}");
-
-            foreach (var log in logs)
-            {
-                EventLogs.Add(log);
-            }
+            var logs = await Task.Run(() => _detectorRepository.GetEventLogs(start, end).ToList());
+            EventLogs = new ObservableCollection<EventLogModel>(logs);
         }
 
         [RelayCommand]
-        private void SearchDumpLogs()
+        private async Task SearchDumpLogsAsync()
         {
-            LoadDumpLogsFromDb(DumpStartDate, DumpEndDate);
+            if (IsLoading) return;
+            try
+            {
+                IsLoading = true;
+                await LoadDumpLogsFromDbAsync(GetStartOfDay(DumpStartDate), GetEndOfDay(DumpEndDate));
+            }
+            finally
+            {
+                IsLoading = false;
+            }
         }
 
-        /// <summary>
-        /// 이상징후 덤프 로그 테이블(detector_dump_logs) 조회 연동
-        /// </summary>
-        private void LoadDumpLogsFromDb(DateTime start, DateTime end)
+        private async Task LoadDumpLogsFromDbAsync(DateTime start, DateTime end)
         {
-            DumpLogs.Clear();
-
-            var dumpLogs = _detectorRepository.GetDumpLogs(start, end).ToList();
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] DumpLogs 조회 개수: {dumpLogs.Count}");
-
-            foreach (var log in dumpLogs)
-            {
-                DumpLogs.Add(log);
-            }
+            var dumpLogs = await Task.Run(() => _detectorRepository.GetDumpLogs(start, end).ToList());
+            DumpLogs = new ObservableCollection<DetectorDumpLogModel>(dumpLogs);
         }
 
         [RelayCommand]
@@ -244,6 +319,15 @@ namespace VBMS.ViewModels
         private void ExportDumpExcel()
         {
             MessageBox.Show("이상징후 덤프 로그 엑셀 파일 저장이 완료되었습니다.", "내보내기 성공", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _timer?.Stop();
+                _disposed = true;
+            }
         }
     }
 }

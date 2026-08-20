@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
-using VBMS.Enums; // ⭐ [추가] AnomalyStatus Enum 참조
+using VBMS.Enums;
 using VBMS.Models;
 using VBMS.Repositories;
 using VBMS.Services.Communications;
@@ -15,7 +15,7 @@ using VBMS.Services.Storage;
 
 namespace VBMS.Services.Orchestrators
 {
-    public class FdsDataOrchestrator : IFdsDataOrchestrator
+    public class FdsDataOrchestrator : IFdsDataOrchestrator, IDisposable
     {
         private readonly ICrpCommunicationService _commService;
         private readonly FdsOpcServer _opcServer;
@@ -31,8 +31,8 @@ namespace VBMS.Services.Orchestrators
         private readonly Timer _watchdogTimer;
         private readonly Timer _summaryTimer;
 
-        // 4초 간격 Summary 집계를 위해 데이터를 임시 보관하는 버퍼
-        private readonly ConcurrentBag<DetectorData> _summaryBuffer = new();
+        // 4초 간격 Summary 집계를 위해 데이터를 안전하게 스레드 세이프 보관하는 큐
+        private readonly ConcurrentQueue<DetectorData> _summaryBuffer = new();
 
         private readonly TimeSpan _timeoutThreshold = TimeSpan.FromSeconds(10);
         private bool _disposed = false;
@@ -66,8 +66,6 @@ namespace VBMS.Services.Orchestrators
             _commService.OnLogMessage += HandleLogMessage;
 
             _watchdogTimer = new Timer(CheckBoardTimeouts, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
-
-            // 4초 주기로 Summary 데이터를 집계하여 DB에 저장하는 타이머 작동
             _summaryTimer = new Timer(ProcessSummaryLogs, null, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4));
         }
 
@@ -83,115 +81,146 @@ namespace VBMS.Services.Orchestrators
 
         private async void HandlePacketReceived(CrpPacket packet)
         {
-            if (packet != null && !string.IsNullOrEmpty(packet.Id))
+            try
             {
-                _boardLastSeen[packet.Id] = DateTime.Now;
-
-                if (_boardTimeoutState.TryGetValue(packet.Id, out bool isTimeout) && isTimeout)
+                if (packet != null && !string.IsNullOrEmpty(packet.Id))
                 {
-                    _boardTimeoutState[packet.Id] = false;
-                    OnLogMessage?.Invoke($"[INFO] CRP 보드 통신 정상 복구: Board ID = {packet.Id}", "Info");
-                }
-            }
+                    _boardLastSeen[packet.Id] = DateTime.Now;
 
-            if (packet != null && packet.Detectors != null && packet.Detectors.Count > 0)
-            {
-                int maxLine = 16;
-                if (int.TryParse(packet.MaxLine, out int ml) && ml > 0)
-                {
-                    maxLine = ml;
-                }
-
-                if (_mappingService.TryGetBoardMapping(packet.Id, maxLine, out int lane, out int bayOffset))
-                {
-                    int.TryParse(packet.Id, out int boardId);
-
-                    // 1. 각 감지기에 BoardId 채워주기 및 서머리 버퍼 수집
-                    foreach (var det in packet.Detectors)
+                    if (_boardTimeoutState.TryGetValue(packet.Id, out bool isTimeout) && isTimeout)
                     {
-                        det.BoardId = boardId;
-                        _summaryBuffer.Add(det);
+                        _boardTimeoutState[packet.Id] = false;
+                        OnLogMessage?.Invoke($"[INFO] CRP 보드 통신 정상 복구: Board ID = {packet.Id}", "Info");
+                    }
+                }
+
+                if (packet != null && packet.Detectors != null && packet.Detectors.Count > 0)
+                {
+                    int maxLine = 16;
+                    if (int.TryParse(packet.MaxLine, out int ml) && ml > 0)
+                    {
+                        maxLine = ml;
                     }
 
-                    // 2. 원시 텔레메트리 데이터 DB 수집 채널 밀어넣기
-                    _telemetryStorageService.EnqueueRange(packet.Detectors);
-
-                    // 3. OPC UA 서버 업데이트 및 이상징후/화재 검증 로직 실행
-                    if (_opcServer.NodeManager != null)
+                    if (_mappingService.TryGetBoardMapping(packet.Id, maxLine, out int lane, out int bayOffset))
                     {
-                        var dumpList = new List<(DetectorData Data, DateTime ReceivedAt)>();
-                        DateTime now = DateTime.Now;
+                        int.TryParse(packet.Id, out int boardId);
 
-                        // ⭐ [추가] 정상 작동 중인 유효 센서만으로 랙 평균 온도 산출 (0℃ 및 에러 상태 제외)
-                        var validDetectors = packet.Detectors.Where(d => d.Status < 3 && d.Temperature > 0).ToList();
-                        double rackAvgTemp = validDetectors.Count > 0 ? validDetectors.Average(d => d.Temperature) : 0;
-
+                        // 1. 각 감지기에 BoardId 채워주기 및 서머리 버퍼 수집
                         foreach (var det in packet.Detectors)
                         {
-                            // ⭐ [추가] 평균 온도 기반 사전 이상징후(DeltaTempWarning, AbsoluteTempWarning) 평가
-                            AnomalyStatus anomaly = _signalEvaluator.EvaluateAnomaly(det.Status, det.Temperature, rackAvgTemp);
+                            det.BoardId = boardId;
+                            _summaryBuffer.Enqueue(det);
+                        }
 
-                            uint rawSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
-                            string detectorKey = $"Lane_{lane}_Bay_{det.Bay}_Level_{det.Level}";
+                        // 2. 원시 텔레메트리 데이터 DB 수집 채널 밀어넣기
+                        _telemetryStorageService.EnqueueRange(packet.Detectors);
 
-                            uint finalSignal = await _verificationService.VerifySignalAsync(
-                                detectorKey,
-                                rawSignal,
-                                packet.Id,
-                                det.Bay,
-                                det.Level
-                            );
+                        // 3. OPC UA 서버 업데이트 및 이상징후/화재 검증 로직 실행
+                        if (_opcServer.NodeManager != null)
+                        {
+                            var dumpList = new List<(DetectorData Data, DateTime ReceivedAt)>();
+                            DateTime now = DateTime.Now;
 
-                            // ⭐ [수정] 화재 확정(finalSignal > 0)뿐만 아니라 사전 이상징후(편차 이상, 주의 온도) 감지 시에도 Dump 저장 대상 수집
-                            if (finalSignal > 0 || anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
+                            // 정상 작동 중인 유효 센서만으로 랙 평균 온도 산출
+                            var validDetectors = packet.Detectors.Where(d => d.Status < 3 && d.Temperature > 0).ToList();
+                            double rackAvgTemp = validDetectors.Count > 0 ? validDetectors.Average(d => d.Temperature) : 0;
+
+                            foreach (var det in packet.Detectors)
                             {
-                                dumpList.Add((det, now));
+                                AnomalyStatus anomaly = _signalEvaluator.EvaluateAnomaly(det.Status, det.Temperature, rackAvgTemp);
+                                uint rawSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
+                                string detectorKey = $"Lane_{lane}_Bay_{det.Bay}_Level_{det.Level}";
 
-                                // 이상징후 감지 시 시스템 로그 출력
-                                if (anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
+                                uint finalSignal = await _verificationService.VerifySignalAsync(
+                                    detectorKey,
+                                    rawSignal,
+                                    packet.Id,
+                                    det.Bay,
+                                    det.Level
+                                );
+
+                                if (finalSignal > 0 || anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
                                 {
-                                    OnLogMessage?.Invoke($"[이상징후 감지] Board:{packet.Id}, Bay:{det.Bay}, LV:{det.Level}, 상태:{anomaly}, 현재온도:{det.Temperature}℃, 평균온도:{rackAvgTemp:F1}℃", "Warning");
+                                    dumpList.Add((det, now));
+
+                                    if (anomaly == AnomalyStatus.DeltaTempWarning || anomaly == AnomalyStatus.AbsoluteTempWarning)
+                                    {
+                                        string logMsg = $"[이상징후 감지] Board:{packet.Id}, Bay:{det.Bay}, LV:{det.Level}, 상태:{anomaly}, 현재온도:{det.Temperature}℃, 평균온도:{rackAvgTemp:F1}℃";
+                                        OnLogMessage?.Invoke(logMsg, "Warning");
+
+                                        int globalRow = (det.Bay - 1) + bayOffset;
+
+                                        // 비동기 DB 기록 예외 처리 포함
+                                        _ = Task.Run(async () =>
+                                        {
+                                            try
+                                            {
+                                                await _repository.SaveEventLogAsync(globalRow, det.Bay, det.Level, logMsg, now);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                OnLogMessage?.Invoke($"[ERROR] 이벤트 로그 DB 저장 실패: {ex.Message}", "Error");
+                                            }
+                                        });
+                                    }
                                 }
+
+                                int cellRow = (det.Bay - 1) + bayOffset;
+                                int col = (det.Level >= 13) ? det.Level - 1 : det.Level;
+
+                                _opcServer.NodeManager.UpdateRackCell(lane, cellRow, col, finalSignal);
                             }
 
-                            int globalRow = (det.Bay - 1) + bayOffset;
-                            int col = (det.Level >= 13) ? det.Level - 1 : det.Level;
-
-                            _opcServer.NodeManager.UpdateRackCell(lane, globalRow, col, finalSignal);
+                            if (dumpList.Count > 0)
+                            {
+                                Task.Run(() =>
+                                {
+                                    try
+                                    {
+                                        _repository.SaveDumpBatch(dumpList);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        OnLogMessage?.Invoke($"[ERROR] DumpBatch DB 저장 실패: {ex.Message}", "Error");
+                                    }
+                                });
+                            }
                         }
-
-                        // ⭐ [수정] 화재 및 이상 징후 감지 건이 있을 경우 Dump 데이터 일괄 DB 저장
-                        if (dumpList.Count > 0)
+                        else
                         {
-                            Task.Run(() => _repository.SaveDumpBatch(dumpList));
+                            OnLogMessage?.Invoke("[WARN] OPC UA NodeManager가 아직 초기화되지 않았습니다.", "Warning");
                         }
+
+                        OnPacketProcessedWithOffset?.Invoke(bayOffset, packet);
                     }
                     else
                     {
-                        OnLogMessage?.Invoke("[WARN] OPC UA NodeManager가 아직 초기화되지 않았습니다.", "Warning");
+                        OnLogMessage?.Invoke($"[WARN] appsettings.json에 등록되지 않은 보드 ID 수신: {packet.Id}", "Warning");
                     }
-
-                    OnPacketProcessedWithOffset?.Invoke(bayOffset, packet);
                 }
-                else
+
+                if (packet != null)
                 {
-                    OnLogMessage?.Invoke($"[WARN] appsettings.json에 등록되지 않은 보드 ID 수신: {packet.Id}", "Warning");
+                    OnPacketProcessed?.Invoke(packet);
                 }
             }
-
-            if (packet != null)
+            catch (Exception ex)
             {
-                OnPacketProcessed?.Invoke(packet);
+                OnLogMessage?.Invoke($"[CRITICAL] 패킷 처리 중 예외 발생 (Board ID: {packet?.Id}): {ex.Message}", "Error");
             }
         }
 
-        // 4초 주기 Summary 데이터 집계 및 저장 로직
         private void ProcessSummaryLogs(object? state)
         {
             if (_summaryBuffer.IsEmpty) return;
 
-            var snapshot = _summaryBuffer.ToList();
-            _summaryBuffer.Clear();
+            // ConcurrentQueue에서 안전하게 데이터 추출 (Race Condition 예방)
+            var snapshot = new List<DetectorData>();
+            while (_summaryBuffer.TryDequeue(out var item))
+            {
+                snapshot.Add(item);
+            }
 
             if (snapshot.Count == 0) return;
 
@@ -199,13 +228,9 @@ namespace VBMS.Services.Orchestrators
                 .GroupBy(d => d.BoardId)
                 .Select(g =>
                 {
-                    var firstData = g.First();
-                    string rackId = $"BAY{firstData.Bay:D2}_LV{firstData.Level:D2}";
-
-                    // 정상 작동 중인 유효 센서만 필터링 (에러 상태 제외 및 0℃ 초과 데이터)
+                    string rackId = $"BOARD_{g.Key:D2}";
                     var validDetectors = g.Where(d => d.Status < 3 && d.Temperature > 0).ToList();
 
-                    // 만약 보드 내 모든 센서가 미연결/에러라면 0으로 처리, 유효 센서가 1개라도 있다면 유효 센서로만 집계
                     double avgTemp = validDetectors.Count > 0 ? validDetectors.Average(d => d.Temperature) : 0;
                     double maxTemp = validDetectors.Count > 0 ? validDetectors.Max(d => d.Temperature) : 0;
                     double minTemp = validDetectors.Count > 0 ? validDetectors.Min(d => d.Temperature) : 0;
@@ -231,7 +256,17 @@ namespace VBMS.Services.Orchestrators
 
             if (summaryList.Count > 0)
             {
-                Task.Run(() => _repository.SaveSummaryBatch(summaryList));
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        _repository.SaveSummaryBatch(summaryList);
+                    }
+                    catch (Exception ex)
+                    {
+                        OnLogMessage?.Invoke($"[ERROR] SummaryBatch DB 저장 실패: {ex.Message}", "Error");
+                    }
+                });
             }
         }
 
@@ -265,7 +300,23 @@ namespace VBMS.Services.Orchestrators
                                     _opcServer.NodeManager.SetBoardCommunicationFault(lane.LaneNumber, bayOffset, 16);
                                 }
 
-                                OnLogMessage?.Invoke($"[ERROR] CRP 보드 통신 두절 감지: Board ID = {boardId} (레인 {lane.LaneNumber}, 연 오프셋 {bayOffset})", "Error");
+                                string errorMsg = $"[ERROR] CRP 보드 통신 두절 감지: Board ID = {boardId} (레인 {lane.LaneNumber}, 연 오프셋 {bayOffset})";
+                                OnLogMessage?.Invoke(errorMsg, "Error");
+
+                                if (int.TryParse(boardId, out int bId))
+                                {
+                                    _ = Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            await _repository.SaveEventLogAsync(bId, 0, 0, errorMsg, now);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            OnLogMessage?.Invoke($"[ERROR] 통신두절 이벤트 DB 저장 실패: {ex.Message}", "Error");
+                                        }
+                                    });
+                                }
                             }
                         }
                     }
@@ -287,6 +338,9 @@ namespace VBMS.Services.Orchestrators
         {
             if (!_disposed)
             {
+                _watchdogTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                _summaryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
                 _watchdogTimer?.Dispose();
                 _summaryTimer?.Dispose();
 
