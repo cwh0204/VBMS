@@ -78,7 +78,8 @@ namespace VBMS.ViewModels
             FireCount = Rack.CellList.Count(c =>
                 string.Equals(c.CellColor, "#F44336", StringComparison.OrdinalIgnoreCase));
 
-            // 사용중지 (#607D8B)
+            // 사용중지 (#
+            // 7D8B)
             DisabledCount = Rack.CellList.Count(c =>
                 string.Equals(c.CellColor, "#607D8B", StringComparison.OrdinalIgnoreCase));
         }

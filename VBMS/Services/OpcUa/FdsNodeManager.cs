@@ -72,6 +72,21 @@ namespace VBMS.Services.OpcUa
             }
         }
 
+        /// <summary>
+        /// 30초 주기 타이머에서 호출할 Alive 토글 메서드
+        /// </summary>
+        public void SetAlive(bool state = true)
+        {
+            lock (Lock)
+            {
+                if (_aliveNode != null)
+                {
+                    _aliveNode.Value = state;
+                    _aliveNode.ClearChangeMasks(SystemContext, true);
+                }
+            }
+        }
+
         private NodeId CreateFireSignalInfoDataType()
         {
             NodeId dataTypeId = new NodeId("FireSignalInfo", NamespaceIndex);
@@ -209,10 +224,23 @@ namespace VBMS.Services.OpcUa
                     {
                         uint finalSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
 
+                        // 기존 Signal과 TimeStamp 확인
+                        uint oldSignal = 0;
+                        DateTime existingTimeStamp = now;
+
+                        if (matrix[globalRow, col]?.Body is FireSignalInfo oldInfo)
+                        {
+                            oldSignal = oldInfo.Signal;
+                            existingTimeStamp = oldInfo.TimeStamp;
+                        }
+
+                        // Signal 상태가 바뀌었을 때만 현재 시각으로 TimeStamp 갱신
+                        DateTime finalTimeStamp = (oldSignal != finalSignal) ? now : existingTimeStamp;
+
                         matrix[globalRow, col] = new ExtensionObject(new FireSignalInfo
                         {
                             Signal = finalSignal,
-                            TimeStamp = now
+                            TimeStamp = finalTimeStamp
                         });
 
                         isUpdated = true;
@@ -243,10 +271,22 @@ namespace VBMS.Services.OpcUa
 
                 if (row < 0 || row >= targetBay || col < 0 || col >= targetLevel) return;
 
+                uint oldSignal = 0;
+                DateTime existingTimeStamp = DateTime.Now;
+
+                if (matrix[row, col]?.Body is FireSignalInfo oldInfo)
+                {
+                    oldSignal = oldInfo.Signal;
+                    existingTimeStamp = oldInfo.TimeStamp;
+                }
+
+                DateTime now = DateTime.Now;
+                DateTime finalTimeStamp = (oldSignal != signal) ? now : existingTimeStamp;
+
                 matrix[row, col] = new ExtensionObject(new FireSignalInfo
                 {
                     Signal = signal,
-                    TimeStamp = DateTime.Now
+                    TimeStamp = finalTimeStamp
                 });
 
                 targetNode.Value = matrix;
@@ -268,8 +308,9 @@ namespace VBMS.Services.OpcUa
                 int inputRows = signalMatrix.GetLength(0);
                 int inputCols = signalMatrix.GetLength(1);
 
-                DateTime now = DateTime.Now;
+                var existingMatrix = targetNode.Value as ExtensionObject[,];
                 var matrix = new ExtensionObject[targetBay, targetLevel];
+                DateTime now = DateTime.Now;
 
                 for (int i = 0; i < targetBay; i++)
                 {
@@ -277,10 +318,21 @@ namespace VBMS.Services.OpcUa
                     {
                         uint sig = i < inputRows && j < inputCols ? signalMatrix[i, j] : 0;
 
+                        uint oldSignal = 0;
+                        DateTime existingTimeStamp = now;
+
+                        if (existingMatrix != null && existingMatrix[i, j]?.Body is FireSignalInfo oldInfo)
+                        {
+                            oldSignal = oldInfo.Signal;
+                            existingTimeStamp = oldInfo.TimeStamp;
+                        }
+
+                        DateTime finalTimeStamp = (oldSignal != sig) ? now : existingTimeStamp;
+
                         matrix[i, j] = new ExtensionObject(new FireSignalInfo
                         {
                             Signal = sig,
-                            TimeStamp = now
+                            TimeStamp = finalTimeStamp
                         });
                     }
                 }
@@ -289,29 +341,54 @@ namespace VBMS.Services.OpcUa
                 targetNode.ClearChangeMasks(SystemContext, true);
             }
         }
-
-        public void SetBoardCommunicationFault(int lane, int bayOffset, int bayCount = 16)
+        /// <summary>
+        /// 특정 보드의 통신 장애 발생 시 해당 보드 영역의 랙 신호를 초기화(0) 처리하는 메서드
+        /// </summary>
+        public void SetBoardCommunicationFault(int lane, int bayOffset, int detectorCount = 10)
         {
+            /*
+            var laneOpt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == lane);
+            int maxBay = laneOpt != null && laneOpt.TargetBay > 0 ? laneOpt.TargetBay : lane == 1 ? 70 : 54;
+            int maxLevel = laneOpt != null && laneOpt.TargetLevel > 0 ? laneOpt.TargetLevel : 13;
+
             lock (Lock)
             {
                 BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
-                if (targetNode?.Value is not ExtensionObject[,] matrix) return;
+                if (targetNode == null) return;
 
-                int maxBay = matrix.GetLength(0);
-                int maxLevel = matrix.GetLength(1);
+                var matrix = targetNode.Value as ExtensionObject[,];
+                if (matrix == null) return;
+
                 DateTime now = DateTime.Now;
                 bool isUpdated = false;
 
-                for (int bay = bayOffset; bay < bayOffset + bayCount && bay < maxBay; bay++)
+                for (int i = 0; i < detectorCount; i++)
                 {
-                    for (int level = 0; level < maxLevel; level++)
+                    int globalRow = bayOffset + i;
+                    if (globalRow >= 0 && globalRow < maxBay)
                     {
-                        matrix[bay, level] = new ExtensionObject(new FireSignalInfo
+                        for (int col = 0; col < maxLevel; col++)
                         {
-                            Signal = 3, // 3: 통신 오류 / 미연결
-                            TimeStamp = now
-                        });
-                        isUpdated = true;
+                            uint oldSignal = 0;
+                            DateTime existingTimeStamp = now;
+
+                            if (matrix[globalRow, col]?.Body is FireSignalInfo oldInfo)
+                            {
+                                oldSignal = oldInfo.Signal;
+                                existingTimeStamp = oldInfo.TimeStamp;
+                            }
+
+                            uint faultSignal = 0; // 통신 장애 시 설정할 신호값 (정상/미감지 0으로 복구)
+                            DateTime finalTimeStamp = (oldSignal != faultSignal) ? now : existingTimeStamp;
+
+                            matrix[globalRow, col] = new ExtensionObject(new FireSignalInfo
+                            {
+                                Signal = faultSignal,
+                                TimeStamp = finalTimeStamp
+                            });
+
+                            isUpdated = true;
+                        }
                     }
                 }
 
@@ -321,6 +398,7 @@ namespace VBMS.Services.OpcUa
                     targetNode.ClearChangeMasks(SystemContext, true);
                 }
             }
+            */
         }
     }
 }

@@ -15,6 +15,7 @@ using VBMS.Services.OpcUa;
 using VBMS.Services.Orchestrators;
 using VBMS.Services.Parsers;
 using VBMS.Services.Storage;
+using VBMS.Services.Theme;
 using VBMS.ViewModels;
 using VBMS.Views;
 
@@ -64,6 +65,9 @@ namespace VBMS
                     // 2. OPC UA Server 및 HostedService 등록
                     services.AddSingleton<FdsOpcServer>();
                     services.AddHostedService<FdsOpcServerHostedService>();
+
+                    // Theme 설정 변경
+                    services.AddSingleton<ThemeService>();
 
                     // UI ViewModels & Windows
                     services.AddSingleton<MainWindowViewModel>();

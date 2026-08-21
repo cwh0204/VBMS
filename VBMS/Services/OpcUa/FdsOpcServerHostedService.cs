@@ -16,6 +16,7 @@ namespace VBMS.Services.OpcUa
         private readonly FdsOpcServer _opcServer;
         private readonly ILogger<FdsOpcServerHostedService> _logger;
         private ApplicationInstance? _opcApplication;
+        private CancellationTokenSource? _aliveCts;
 
         public FdsOpcServerHostedService(FdsOpcServer opcServer, ILogger<FdsOpcServerHostedService> logger)
         {
@@ -97,6 +98,12 @@ namespace VBMS.Services.OpcUa
                         config.ApplicationUri,
                         hostName
                     );
+
+                    // 1. 생성한 자체 서명 인증서를 스토어에 저장하여 재시작 시 유지
+                    using (ICertificateStore store = config.SecurityConfiguration.ApplicationCertificate.OpenStore())
+                    {
+                        await store.AddAsync(cert);
+                    }
                 }
                 config.SecurityConfiguration.ApplicationCertificate.Certificate = cert;
 
@@ -109,6 +116,10 @@ namespace VBMS.Services.OpcUa
 
                 await _opcApplication.StartAsync(_opcServer);
                 _logger.LogInformation("OPC UA 서버가 성공적으로 시작되었습니다. (Port: 4840)");
+
+                // 2. Alive 30초 주기 타이머 시작
+                _aliveCts = new CancellationTokenSource();
+                _ = StartAliveLoopAsync(_aliveCts.Token);
             }
             catch (Exception ex)
             {
@@ -119,11 +130,38 @@ namespace VBMS.Services.OpcUa
 
         public async Task StopAsync(CancellationToken cancellationToken)
         {
+            // 타이머 중지
+            _aliveCts?.Cancel();
+            _aliveCts?.Dispose();
+
             if (_opcApplication != null)
             {
                 _logger.LogInformation("OPC UA 서버 중지 중...");
                 await _opcApplication.StopAsync();
                 _logger.LogInformation("OPC UA 서버 중지 완료.");
+            }
+        }
+
+        /// <summary>
+        /// 30초마다 Alive 노드값을 true(turn-on)로 설정하는 백그라운드 루프
+        /// </summary>
+        private async Task StartAliveLoopAsync(CancellationToken cancellationToken)
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(cancellationToken))
+                {
+                    _opcServer.NodeManager?.SetAlive(true);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 정상 종료 시 예외 무시
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Alive 타이머 루프 수행 중 오류 발생");
             }
         }
 

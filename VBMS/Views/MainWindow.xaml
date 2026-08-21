@@ -44,23 +44,54 @@
                 <!-- 로고 및 시스템 타이틀 -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Test" FontSize="18" FontWeight="Bold" Foreground="#FFC107" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="VBMS" FontSize="14" FontWeight="Bold" Foreground="#333333" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="|    배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+
+                    <TextBlock Text="VBMS" FontSize="14" FontWeight="Bold" 
+                               Foreground="{DynamicResource MaterialDesignBody}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+
+                    <TextBlock Text="|   배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" 
+                               Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                 </StackPanel>
 
                 <!-- 우측 시계 및 버튼 -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <TextBlock Text="Sample" FontWeight="SemiBold" Margin="0,0,16,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="2026-08-10 11:15:00" FontWeight="Medium" Margin="0,0,16,0" VerticalAlignment="Center" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                    <TextBlock Text="Sample" FontWeight="SemiBold" Margin="0,0,16,0" VerticalAlignment="Center"
+                               Foreground="{DynamicResource MaterialDesignBody}"/>
+
+                    <TextBlock Text="2026-08-10 11:15:00" FontWeight="Medium" Margin="0,0,16,0" VerticalAlignment="Center" 
+                               Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
+
+                    <!-- ☀️/🌙 라이트/다크 모드 전환 토글 버튼 -->
+                    <ToggleButton Style="{StaticResource MaterialDesignIconButton}"
+                                  IsChecked="{Binding IsDarkMode}"
+                                  Command="{Binding ToggleThemeCommand}"
+                                  ToolTip="테마 전환 (라이트 / 다크 모드)"
+                                  Margin="0,0,8,0">
+                        <materialDesign:PackIcon Width="20" Height="20">
+                            <materialDesign:PackIcon.Style>
+                                <Style TargetType="materialDesign:PackIcon">
+                                    <!-- 기본값: 라이트모드 (낮/해) -->
+                                    <Setter Property="Kind" Value="WeatherSunny"/>
+                                    <Setter Property="Foreground" Value="#FF9800"/>
+                                    <Style.Triggers>
+                                        <!-- 다크모드 활성화 시 (밤/달) -->
+                                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=IsChecked}" Value="True">
+                                            <Setter Property="Kind" Value="WeatherNight"/>
+                                            <Setter Property="Foreground" Value="#FFD700"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </materialDesign:PackIcon.Style>
+                        </materialDesign:PackIcon>
+                    </ToggleButton>
 
                     <Button Style="{StaticResource MaterialDesignIconButton}" 
                             ToolTip="이벤트 로그 팝업" 
                             Command="{Binding OpenDataInquiryCommand}"
                             Margin="0,0,4,0">
-                        <materialDesign:PackIcon Kind="ViewList" />
+                        <materialDesign:PackIcon Kind="ViewList" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
                     <Button Style="{StaticResource MaterialDesignIconButton}" ToolTip="설정">
-                        <materialDesign:PackIcon Kind="Cog" />
+                        <materialDesign:PackIcon Kind="Cog" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
                 </StackPanel>
             </DockPanel>
@@ -113,16 +144,20 @@
 
                         <!-- C 드라이브 -->
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="C 드라이브 사용량" FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="C 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MaterialDesignBody}"/>
                             <ProgressBar Value="84" Height="6" Margin="0,4,0,0" Foreground="{DynamicResource PrimaryHueMidBrush}"/>
-                            <TextBlock Text="237GB 중 196GB 사용 가능" FontSize="10" Margin="0,2,0,0" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                            <TextBlock Text="237GB 중 196GB 사용 가능" FontSize="10" Margin="0,2,0,0" 
+                                       Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
 
                         <!-- D 드라이브 -->
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="D 드라이브 사용량" FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="D 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource MaterialDesignBody}"/>
                             <ProgressBar Value="0" Height="6" Margin="0,4,0,0" Foreground="#4CAF50"/>
-                            <TextBlock Text="1862GB 중 1862GB 사용 가능" FontSize="10" Margin="0,2,0,0" Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                            <TextBlock Text="1862GB 중 1862GB 사용 가능" FontSize="10" Margin="0,2,0,0" 
+                                       Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
                     </Grid>
 
@@ -130,6 +165,7 @@
 
                     <!-- 2. 실시간 이벤트 데이터 로그 그리드 -->
                     <DataGrid Grid.Row="2" 
+                              Style="{StaticResource MaterialDesignDataGrid}"
                               ItemsSource="{Binding EventLogList}" 
                               AutoGenerateColumns="False"
                               CanUserAddRows="False"
@@ -161,13 +197,13 @@
             </materialDesign:Card>
         </Grid>
 
-        <!-- ⭐ 화재 알림 팝업 오버레이 레이어 (수정 완료) -->
+        <!-- ⭐ 화재 알림 팝업 오버레이 레이어 -->
         <ItemsControl ItemsSource="{Binding ActiveAlarms}"
-              HorizontalAlignment="Center"
-              VerticalAlignment="Center"
-              Margin="0,20,0,0"
-              Panel.ZIndex="999"
-              Grid.RowSpan="2">
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      Margin="0,20,0,0"
+                      Panel.ZIndex="999"
+                      Grid.RowSpan="2">
 
             <!-- 세로로 쌓이도록 패널 설정 -->
             <ItemsControl.ItemsPanel>

@@ -67,7 +67,10 @@
                         <materialDesign:PackIcon Kind="ServerNetwork" Width="16" Height="16" 
                                                  Foreground="{DynamicResource PrimaryHueMidBrush}" 
                                                  VerticalAlignment="Center" Margin="0,0,4,0"/>
-                        <TextBlock Text="{Binding RackName}" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
+
+                        <!-- ✏️ 랙 이름: MaterialDesignBody 적용으로 테마 호환성 확보 -->
+                        <TextBlock Text="{Binding RackName}" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource MaterialDesignBody}"/>
 
                         <!-- 온도 표시 뱃지 (Pill 디자인) -->
                         <Border Background="{DynamicResource PrimaryHueLightBrush}" 
@@ -91,19 +94,19 @@
                             <TextBlock Text="{Binding RackStatusText}" FontWeight="Bold" FontSize="10" Foreground="{Binding RackStatusFgColor}"/>
                         </Border>
 
-                        <!-- 깔끔한 툴바 스타일 아이콘 버튼 -->
+                        <!-- 깔끔한 툴바 스타일 아이콘 버튼 (✏️ 아이콘 Foreground에 MaterialDesignBody 추가) -->
                         <Button Style="{StaticResource MaterialDesignToolButton}" Width="24" Height="24" ToolTip="상태 아이콘" Padding="0" Margin="1,0">
-                            <materialDesign:PackIcon Kind="Poll" Width="14" Height="14" Opacity="0.75"/>
+                            <materialDesign:PackIcon Kind="Poll" Width="14" Height="14" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.8"/>
                         </Button>
                         <Button Style="{StaticResource MaterialDesignToolButton}" Width="24" Height="24" ToolTip="온도 상세" Padding="0" Margin="1,0">
-                            <materialDesign:PackIcon Kind="Thermometer" Width="14" Height="14" Opacity="0.75"/>
+                            <materialDesign:PackIcon Kind="Thermometer" Width="14" Height="14" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.8"/>
                         </Button>
 
                         <!-- ⭐ [Step 1 추가] 클릭 시 열 상세 정보창 오픈 커맨드 연결 -->
                         <Button Style="{StaticResource MaterialDesignToolButton}" 
                                 Command="{Binding OpenDetailWindowCommand}"
                                 Width="24" Height="24" ToolTip="그리드 상세" Padding="0" Margin="1,0">
-                            <materialDesign:PackIcon Kind="Fullscreen" Width="14" Height="14" Opacity="0.75"/>
+                            <materialDesign:PackIcon Kind="Fullscreen" Width="14" Height="14" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.8"/>
                         </Button>
                     </StackPanel>
                 </DockPanel>
@@ -126,7 +129,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- 연(Bay) 헤더 -->
+                        <!-- 연(Bay) 헤더 (✏️ MaterialDesignBody + Opacity로 가독성 개선) -->
                         <ItemsControl Grid.Row="0" Grid.Column="1" ItemsSource="{Binding BayLabels}" Margin="0,0,0,2">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -137,12 +140,12 @@
                                 <DataTemplate>
                                     <TextBlock Text="{Binding}" FontSize="8" FontWeight="SemiBold"
                                                HorizontalAlignment="Center" 
-                                               Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                                               Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <!-- 단(Level) 헤더 -->
+                        <!-- 단(Level) 헤더 (✏️ MaterialDesignBody + Opacity로 가독성 개선) -->
                         <ItemsControl Grid.Row="1" Grid.Column="0" ItemsSource="{Binding LevelLabels}" Margin="0,0,2,0">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -154,7 +157,7 @@
                                     <TextBlock Text="{Binding}" FontSize="8" FontWeight="SemiBold"
                                                VerticalAlignment="Center" HorizontalAlignment="Right"
                                                Margin="0,0,3,0"
-                                               Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+                                               Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

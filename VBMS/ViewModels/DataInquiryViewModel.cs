@@ -1,5 +1,9 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LiveChartsCore;
+using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
+using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -9,10 +13,6 @@ using System.Windows;
 using System.Windows.Threading;
 using VBMS.Models;
 using VBMS.Repositories;
-using LiveChartsCore;
-using LiveChartsCore.SkiaSharpView;
-using LiveChartsCore.SkiaSharpView.Painting;
-using SkiaSharp;
 
 namespace VBMS.ViewModels
 {
@@ -47,45 +47,7 @@ namespace VBMS.ViewModels
         private DateTime _dumpEndDate = DateTime.Now.Date;
 
         // ==========================================
-        // 1. 차트 단위 선택 프로퍼티 (시간별 / 일별)
-        // [ObservableProperty] 대신 명시적 속성을 사용하여 Source Generator 오류 방지
-        // ==========================================
-        private bool _isHourlySelected = true;
-        public bool IsHourlySelected
-        {
-            get => _isHourlySelected;
-            set
-            {
-                if (SetProperty(ref _isHourlySelected, value))
-                {
-                    if (value)
-                    {
-                        IsDailySelected = false;
-                        _ = LoadChartDataFromDbAsync(GetStartOfDay(GlobalStartDate), GetEndOfDay(GlobalEndDate));
-                    }
-                }
-            }
-        }
-
-        private bool _isDailySelected;
-        public bool IsDailySelected
-        {
-            get => _isDailySelected;
-            set
-            {
-                if (SetProperty(ref _isDailySelected, value))
-                {
-                    if (value)
-                    {
-                        IsHourlySelected = false;
-                        _ = LoadChartDataFromDbAsync(GetStartOfDay(GlobalStartDate), GetEndOfDay(GlobalEndDate));
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 2. 차트 영역 (Summary Logs)
+        // 1. 차트 영역 (Summary Logs)
         // ==========================================
         private ISeries[] _temperatureSeries = Array.Empty<ISeries>();
         public ISeries[] TemperatureSeries
@@ -109,7 +71,7 @@ namespace VBMS.ViewModels
         }
 
         // ==========================================
-        // 3. 데이터 목록 영역
+        // 2. 데이터 목록 영역
         // ==========================================
         [ObservableProperty]
         private ObservableCollection<EventLogModel> _eventLogs = new();
@@ -118,7 +80,7 @@ namespace VBMS.ViewModels
         private ObservableCollection<DetectorDumpLogModel> _dumpLogs = new();
 
         // ==========================================
-        // 4. 실시간 시계 프로퍼티
+        // 3. 실시간 시계 프로퍼티
         // ==========================================
         [ObservableProperty]
         private string _currentTimeString = DateTime.Now.ToString("HH:mm:ss");
@@ -144,7 +106,7 @@ namespace VBMS.ViewModels
         private static DateTime GetEndOfDay(DateTime date) => date.Date.AddDays(1).AddSeconds(-1);
 
         // ==========================================
-        // 5. 비동기 커맨드 및 데이터베이스 조회 메서드
+        // 4. 비동기 커맨드 및 데이터베이스 조회 메서드
         // ==========================================
 
         [RelayCommand]
@@ -199,46 +161,94 @@ namespace VBMS.ViewModels
                 return;
             }
 
-            var groupedData = IsHourlySelected
-                ? summaryLogs
+            // 검색 기간 범위가 아닌, 실제 데이터의 최소/최대 시간차 계산
+            DateTime minTimestamp = summaryLogs.First().Timestamp;
+            DateTime maxTimestamp = summaryLogs.Last().Timestamp;
+            TimeSpan actualDataSpan = maxTimestamp - minTimestamp;
+
+            // 실제 데이터 시간차 기준 동적 집계
+            var groupedData = actualDataSpan switch
+            {
+                // 1. 데이터 분포가 1시간 이내 -> 1분 단위 집계 (HH:mm)
+                var d when d.TotalHours <= 1 => summaryLogs
+                    .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, x.Timestamp.Minute, 0))
+                    .Select(g => new
+                    {
+                        Label = g.Key.ToString("HH:mm"),
+                        AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
+                        MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
+                    }),
+
+                // 2. 데이터 분포가 12시간 이내 -> 10분 단위 집계 (HH:mm)
+                var d when d.TotalHours <= 12 => summaryLogs
+                    .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, (x.Timestamp.Minute / 10) * 10, 0))
+                    .Select(g => new
+                    {
+                        Label = g.Key.ToString("HH:mm"),
+                        AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
+                        MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
+                    }),
+
+                // 3. 데이터 분포가 3일 이내 -> 1시간 단위 집계 (MM/dd HH:00)
+                var d when d.TotalDays <= 3 => summaryLogs
                     .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, 0, 0))
                     .Select(g => new
                     {
                         Label = g.Key.ToString("MM/dd HH:00"),
                         AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
-                    })
-                    .OrderBy(x => x.Label)
-                    .ToList()
-                : summaryLogs
+                    }),
+
+                // 4. 데이터 분포가 90일 이내 -> 1일 단위 집계 (yyyy-MM-dd)
+                var d when d.TotalDays <= 90 => summaryLogs
                     .GroupBy(x => x.Timestamp.Date)
                     .Select(g => new
                     {
                         Label = g.Key.ToString("yyyy-MM-dd"),
                         AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
+                    }),
+
+                // 5. 그 이상 -> 1개월 단위 집계 (yyyy-MM)
+                _ => summaryLogs
+                    .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, 1))
+                    .Select(g => new
+                    {
+                        Label = g.Key.ToString("yyyy-MM"),
+                        AvgTemp = Math.Round(g.Average(x => x.AvgTemperature), 1),
+                        MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
                     })
-                    .OrderBy(x => x.Label)
-                    .ToList();
+            };
+
+            var resultList = groupedData.OrderBy(x => x.Label).ToList();
+
+            string axisName = actualDataSpan switch
+            {
+                var d when d.TotalHours <= 1 => "시간 (1분 단위)",
+                var d when d.TotalHours <= 12 => "시간 (10분 단위)",
+                var d when d.TotalDays <= 3 => "시간 (1시간 단위)",
+                var d when d.TotalDays <= 90 => "일자 (1일 단위)",
+                _ => "월 (1개월 단위)"
+            };
 
             TemperatureSeries = new ISeries[]
             {
                 new LineSeries<double>
                 {
                     Name = "평균 온도 (°C)",
-                    Values = groupedData.Select(x => x.AvgTemp).ToArray(),
+                    Values = resultList.Select(x => x.AvgTemp).ToArray(),
                     Stroke = new SolidColorPaint(SKColors.DodgerBlue, 2.5f),
                     Fill = null,
-                    GeometrySize = groupedData.Count > 150 ? 0 : 5,
+                    GeometrySize = resultList.Count > 150 ? 0 : 5,
                     GeometryStroke = new SolidColorPaint(SKColors.DodgerBlue, 2.5f)
                 },
                 new LineSeries<double>
                 {
                     Name = "최고 온도 (°C)",
-                    Values = groupedData.Select(x => x.MaxTemp).ToArray(),
+                    Values = resultList.Select(x => x.MaxTemp).ToArray(),
                     Stroke = new SolidColorPaint(SKColors.Tomato, 2.5f),
                     Fill = null,
-                    GeometrySize = groupedData.Count > 150 ? 0 : 5,
+                    GeometrySize = resultList.Count > 150 ? 0 : 5,
                     GeometryStroke = new SolidColorPaint(SKColors.Tomato, 2.5f)
                 }
             };
@@ -247,8 +257,8 @@ namespace VBMS.ViewModels
             {
                 new Axis
                 {
-                    Name = IsHourlySelected ? "시간 단위 (HH:00)" : "일자 단위 (YYYY-MM-DD)",
-                    Labels = groupedData.Select(x => x.Label).ToArray(),
+                    Name = axisName,
+                    Labels = resultList.Select(x => x.Label).ToArray(),
                     TextSize = 12,
                     LabelsRotation = 15,
                     SeparatorsPaint = new SolidColorPaint(SKColors.LightGray.WithAlpha(50))
