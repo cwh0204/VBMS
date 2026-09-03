@@ -82,6 +82,7 @@ namespace VBMS.Services.OpcUa
                 if (_aliveNode != null)
                 {
                     _aliveNode.Value = state;
+                    _aliveNode.Timestamp = DateTime.UtcNow;
                     _aliveNode.ClearChangeMasks(SystemContext, true);
                 }
             }
@@ -196,7 +197,6 @@ namespace VBMS.Services.OpcUa
             if (detectors == null || detectors.Count == 0) return;
 
             var laneOpt = _options.Lanes?.FirstOrDefault(l => l.LaneNumber == lane);
-
             int maxBay = laneOpt != null && laneOpt.TargetBay > 0 ? laneOpt.TargetBay : lane == 1 ? 70 : 54;
             int maxLevel = laneOpt != null && laneOpt.TargetLevel > 0 ? laneOpt.TargetLevel : 13;
 
@@ -205,14 +205,22 @@ namespace VBMS.Services.OpcUa
                 BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode == null) return;
 
-                var matrix = targetNode.Value as ExtensionObject[,];
-                if (matrix == null || matrix.GetLength(0) != maxBay || matrix.GetLength(1) != maxLevel)
+                var existingMatrix = targetNode.Value as ExtensionObject[,];
+                ExtensionObject[,] matrix;
+
+                // 기존 배열이 없거나 규격이 다르면 새로 할당, 있으면 Clone으로 새 참조 생성
+                if (existingMatrix == null || existingMatrix.GetLength(0) != maxBay || existingMatrix.GetLength(1) != maxLevel)
                 {
                     matrix = new ExtensionObject[maxBay, maxLevel];
                     targetNode.ArrayDimensions = new ReadOnlyList<uint>(new uint[] { (uint)maxBay, (uint)maxLevel });
                 }
+                else
+                {
+                    // 참조 주소를 분리해야 SDK가 Value 변경을 감지합니다.
+                    matrix = (ExtensionObject[,])existingMatrix.Clone();
+                }
 
-                DateTime now = DateTime.Now;
+                DateTime now = DateTime.UtcNow; // OPC UA 표준 타임스탬프는 UTC 기준 권장
                 bool isUpdated = false;
 
                 foreach (var det in detectors)
@@ -224,7 +232,6 @@ namespace VBMS.Services.OpcUa
                     {
                         uint finalSignal = _signalEvaluator.Evaluate(det.Status, det.Temperature);
 
-                        // 기존 Signal과 TimeStamp 확인
                         uint oldSignal = 0;
                         DateTime existingTimeStamp = now;
 
@@ -234,7 +241,6 @@ namespace VBMS.Services.OpcUa
                             existingTimeStamp = oldInfo.TimeStamp;
                         }
 
-                        // Signal 상태가 바뀌었을 때만 현재 시각으로 TimeStamp 갱신
                         DateTime finalTimeStamp = (oldSignal != finalSignal) ? now : existingTimeStamp;
 
                         matrix[globalRow, col] = new ExtensionObject(new FireSignalInfo
@@ -249,7 +255,9 @@ namespace VBMS.Services.OpcUa
 
                 if (isUpdated)
                 {
+                    // 참조가 달라졌으므로 ChangeMasks에 NodeStateChangeMasks.Value가 정상 등록됨
                     targetNode.Value = matrix;
+                    targetNode.Timestamp = DateTime.UtcNow;
                     targetNode.ClearChangeMasks(SystemContext, true);
                 }
             }
@@ -266,13 +274,15 @@ namespace VBMS.Services.OpcUa
                 BaseDataVariableState? targetNode = lane == 1 ? _lane1RackNode : _lane2RackNode;
                 if (targetNode == null) return;
 
-                var matrix = targetNode.Value as ExtensionObject[,];
-                if (matrix == null) return;
-
+                var existingMatrix = targetNode.Value as ExtensionObject[,];
+                if (existingMatrix == null) return;
                 if (row < 0 || row >= targetBay || col < 0 || col >= targetLevel) return;
 
+                // 새 참조로 복제
+                var matrix = (ExtensionObject[,])existingMatrix.Clone();
+
                 uint oldSignal = 0;
-                DateTime existingTimeStamp = DateTime.Now;
+                DateTime existingTimeStamp = DateTime.UtcNow;
 
                 if (matrix[row, col]?.Body is FireSignalInfo oldInfo)
                 {
@@ -280,7 +290,7 @@ namespace VBMS.Services.OpcUa
                     existingTimeStamp = oldInfo.TimeStamp;
                 }
 
-                DateTime now = DateTime.Now;
+                DateTime now = DateTime.UtcNow;
                 DateTime finalTimeStamp = (oldSignal != signal) ? now : existingTimeStamp;
 
                 matrix[row, col] = new ExtensionObject(new FireSignalInfo
@@ -290,6 +300,7 @@ namespace VBMS.Services.OpcUa
                 });
 
                 targetNode.Value = matrix;
+                targetNode.Timestamp = DateTime.UtcNow;
                 targetNode.ClearChangeMasks(SystemContext, true);
             }
         }
