@@ -31,7 +31,7 @@ namespace VBMS.Services.Orchestrators
         private readonly Timer _watchdogTimer;
         private readonly Timer _summaryTimer;
 
-        // 4초 간격 Summary 집계를 위해 데이터를 안전하게 스레드 세이프 보관하는 큐
+        // 4초 간격 Summary 집계를 위해 데이터를 스레드 세이프하게 보관하는 큐
         private readonly ConcurrentQueue<DetectorData> _summaryBuffer = new();
 
         private readonly TimeSpan _timeoutThreshold = TimeSpan.FromSeconds(10);
@@ -79,7 +79,7 @@ namespace VBMS.Services.Orchestrators
             _commService.Disconnect();
         }
 
-        private async void HandlePacketReceived(CrpPacket packet)
+        private async void HandlePacketReceived(CrpPacket? packet)
         {
             try
             {
@@ -151,7 +151,7 @@ namespace VBMS.Services.Orchestrators
 
                                         int globalRow = (det.Bay - 1) + bayOffset;
 
-                                        // 비동기 DB 기록 예외 처리 포함
+                                        // 비동기 DB 기록 (Fire-and-Forget 명시)
                                         _ = Task.Run(async () =>
                                         {
                                             try
@@ -174,7 +174,7 @@ namespace VBMS.Services.Orchestrators
 
                             if (dumpList.Count > 0)
                             {
-                                Task.Run(() =>
+                                _ = Task.Run(() =>
                                 {
                                     try
                                     {
@@ -215,7 +215,7 @@ namespace VBMS.Services.Orchestrators
         {
             if (_summaryBuffer.IsEmpty) return;
 
-            // ConcurrentQueue에서 안전하게 데이터 추출 (Race Condition 예방)
+            // ConcurrentQueue에서 안전하게 스냅샷 추출
             var snapshot = new List<DetectorData>();
             while (_summaryBuffer.TryDequeue(out var item))
             {
@@ -256,7 +256,8 @@ namespace VBMS.Services.Orchestrators
 
             if (summaryList.Count > 0)
             {
-                Task.Run(() =>
+                // ★ _ = 를 추가하여 CS4014 컴파일 경고 해결
+                _ = Task.Run(() =>
                 {
                     try
                     {

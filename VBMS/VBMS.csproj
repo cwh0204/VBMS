@@ -50,4 +50,9 @@
     </None>
   </ItemGroup>
 
+ <PropertyGroup>
+   <!-- 프로젝트 전체에서 패키지 타겟 프레임워크 불일치 경고 억제 -->
+   <NoWarn>$(NoWarn);NU1701</NoWarn>
+ </PropertyGroup>
+
 </Project>

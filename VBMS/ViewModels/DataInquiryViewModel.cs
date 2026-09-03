@@ -148,10 +148,9 @@ namespace VBMS.ViewModels
 
         private async Task LoadChartDataFromDbAsync(DateTime start, DateTime end)
         {
-            var summaryLogs = await Task.Run(() =>
-                _detectorRepository.GetSummaryLogs(null, start, end)
-                                   .OrderBy(x => x.Timestamp)
-                                   .ToList());
+            // 리포지토리 비동기 호출 직접 대기 (불필요한 Task.Run 제거)
+            var rawLogs = await _detectorRepository.GetSummaryLogsAsync(null, start, end);
+            var summaryLogs = rawLogs.OrderBy(x => x.Timestamp).ToList();
 
             if (summaryLogs.Count == 0)
             {
@@ -161,15 +160,12 @@ namespace VBMS.ViewModels
                 return;
             }
 
-            // 검색 기간 범위가 아닌, 실제 데이터의 최소/최대 시간차 계산
             DateTime minTimestamp = summaryLogs.First().Timestamp;
             DateTime maxTimestamp = summaryLogs.Last().Timestamp;
             TimeSpan actualDataSpan = maxTimestamp - minTimestamp;
 
-            // 실제 데이터 시간차 기준 동적 집계
             var groupedData = actualDataSpan switch
             {
-                // 1. 데이터 분포가 1시간 이내 -> 1분 단위 집계 (HH:mm)
                 var d when d.TotalHours <= 1 => summaryLogs
                     .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, x.Timestamp.Minute, 0))
                     .Select(g => new
@@ -179,7 +175,6 @@ namespace VBMS.ViewModels
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
                     }),
 
-                // 2. 데이터 분포가 12시간 이내 -> 10분 단위 집계 (HH:mm)
                 var d when d.TotalHours <= 12 => summaryLogs
                     .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, (x.Timestamp.Minute / 10) * 10, 0))
                     .Select(g => new
@@ -189,7 +184,6 @@ namespace VBMS.ViewModels
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
                     }),
 
-                // 3. 데이터 분포가 3일 이내 -> 1시간 단위 집계 (MM/dd HH:00)
                 var d when d.TotalDays <= 3 => summaryLogs
                     .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, x.Timestamp.Day, x.Timestamp.Hour, 0, 0))
                     .Select(g => new
@@ -199,7 +193,6 @@ namespace VBMS.ViewModels
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
                     }),
 
-                // 4. 데이터 분포가 90일 이내 -> 1일 단위 집계 (yyyy-MM-dd)
                 var d when d.TotalDays <= 90 => summaryLogs
                     .GroupBy(x => x.Timestamp.Date)
                     .Select(g => new
@@ -209,7 +202,6 @@ namespace VBMS.ViewModels
                         MaxTemp = Math.Round(g.Max(x => x.MaxTemperature), 1)
                     }),
 
-                // 5. 그 이상 -> 1개월 단위 집계 (yyyy-MM)
                 _ => summaryLogs
                     .GroupBy(x => new DateTime(x.Timestamp.Year, x.Timestamp.Month, 1))
                     .Select(g => new
@@ -294,7 +286,7 @@ namespace VBMS.ViewModels
 
         private async Task LoadEventLogsFromDbAsync(DateTime start, DateTime end)
         {
-            var logs = await Task.Run(() => _detectorRepository.GetEventLogs(start, end).ToList());
+            var logs = await _detectorRepository.GetEventLogsAsync(start, end);
             EventLogs = new ObservableCollection<EventLogModel>(logs);
         }
 
@@ -315,7 +307,7 @@ namespace VBMS.ViewModels
 
         private async Task LoadDumpLogsFromDbAsync(DateTime start, DateTime end)
         {
-            var dumpLogs = await Task.Run(() => _detectorRepository.GetDumpLogs(start, end).ToList());
+            var dumpLogs = await _detectorRepository.GetDumpLogsAsync(start, end);
             DumpLogs = new ObservableCollection<DetectorDumpLogModel>(dumpLogs);
         }
 
@@ -335,7 +327,7 @@ namespace VBMS.ViewModels
         {
             if (!_disposed)
             {
-                _timer?.Stop();
+                _timer.Stop();
                 _disposed = true;
             }
         }

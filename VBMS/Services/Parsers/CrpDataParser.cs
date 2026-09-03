@@ -11,7 +11,8 @@ namespace VBMS.Services.Parsers
         private const int SensorBlockWidth = 4;
         private const int FooterWidth = 6; // fnt(3) + s(1) + SS(2, 고정값 "98")
 
-        public CrpPacket Parse(string rawData)
+        // 반환 타입을 CrpPacket? 로 변경하여 null 반환 경고(CS8603) 해제
+        public CrpPacket? Parse(string? rawData)
         {
             if (string.IsNullOrWhiteSpace(rawData) || !rawData.StartsWith("(") || !rawData.EndsWith(")"))
             {
@@ -76,7 +77,6 @@ namespace VBMS.Services.Parsers
                     if (int.TryParse(chunk.Substring(0, 3), out int rawTemp) &&
                         int.TryParse(chunk.Substring(3, 1), out int status))
                     {
-
                         int bay = (sensorSeq / maxStage) + 1;
                         int level = sensorSeq % maxStage;
 
@@ -93,7 +93,7 @@ namespace VBMS.Services.Parsers
                     }
                     else
                     {
-                        packet.ParseWarning = (packet.ParseWarning == null ? "" : packet.ParseWarning + " | ")
+                        packet.ParseWarning = (string.IsNullOrEmpty(packet.ParseWarning) ? "" : packet.ParseWarning + " | ")
                             + $"인덱스 {i}의 센서 블록 '{chunk}' 파싱 실패, 건너뜀 (이후 좌표가 밀릴 수 있음).";
                     }
                 }
@@ -102,7 +102,7 @@ namespace VBMS.Services.Parsers
                 int expectedCount = maxLine * maxStage;
                 if (packet.Detectors.Count != expectedCount)
                 {
-                    packet.ParseWarning = (packet.ParseWarning == null ? "" : packet.ParseWarning + " | ")
+                    packet.ParseWarning = (string.IsNullOrEmpty(packet.ParseWarning) ? "" : packet.ParseWarning + " | ")
                         + $"기대 감지기 수({maxLine}x{maxStage}={expectedCount})와 실제 파싱된 수({packet.Detectors.Count})가 다릅니다.";
                 }
 

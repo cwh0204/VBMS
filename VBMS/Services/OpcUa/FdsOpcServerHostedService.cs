@@ -76,13 +76,13 @@ namespace VBMS.Services.OpcUa
                     {
                         BaseAddresses = baseAddresses,
                         SecurityPolicies = new ServerSecurityPolicyCollection
-                        {
-                            new ServerSecurityPolicy
-                            {
-                                SecurityPolicyUri = SecurityPolicies.None,
-                                SecurityMode = MessageSecurityMode.None
-                            }
-                        },
+                {
+                    new ServerSecurityPolicy
+                    {
+                        SecurityPolicyUri = SecurityPolicies.None,
+                        SecurityMode = MessageSecurityMode.None
+                    }
+                },
                         DiagnosticsEnabled = false,
                         MaxQueuedRequestCount = 2000
                     }
@@ -90,7 +90,7 @@ namespace VBMS.Services.OpcUa
 
                 await config.ValidateAsync(ApplicationType.Server);
 
-                X509Certificate2 cert = await config.SecurityConfiguration.ApplicationCertificate.FindAsync(true);
+                X509Certificate2? cert = await config.SecurityConfiguration.ApplicationCertificate.FindAsync(true);
                 if (cert == null)
                 {
                     cert = CreateSelfSignedOpcCertificate(
@@ -99,8 +99,8 @@ namespace VBMS.Services.OpcUa
                         hostName
                     );
 
-                    // 1. 생성한 자체 서명 인증서를 스토어에 저장하여 재시작 시 유지
-                    using (ICertificateStore store = config.SecurityConfiguration.ApplicationCertificate.OpenStore())
+                    // 1. (ITelemetryContext)null! 을 넘겨 Deprecated 경고 해결
+                    using (ICertificateStore store = config.SecurityConfiguration.ApplicationCertificate.OpenStore((ITelemetryContext)null!))
                     {
                         await store.AddAsync(cert);
                     }
