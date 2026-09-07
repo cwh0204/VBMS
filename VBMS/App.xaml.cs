@@ -11,6 +11,7 @@ using VBMS.Models;
 using VBMS.Repositories;
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
+using VBMS.Services.Export;
 using VBMS.Services.OpcUa;
 using VBMS.Services.Orchestrators;
 using VBMS.Services.Parsers;
@@ -74,6 +75,8 @@ namespace VBMS
                     services.AddTransient<RackDetailViewModel>();
                     services.AddTransient<DataInquiryViewModel>();
 
+                    // 엑셀 저장
+                    services.AddSingleton<IExcelExportService, ExcelExportService>();
 
                     services.AddTransient<MainWindow>();
                     services.AddTransient<RackDetailWindow>();

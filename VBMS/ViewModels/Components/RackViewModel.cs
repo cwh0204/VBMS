@@ -1,14 +1,14 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using LiveChartsCore.SkiaSharpView.WPF;
 using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using VBMS.Models;
-using VBMS.Services.Evaluators; // ⭐ IFireSignalEvaluator 네임스페이스 추가
+using VBMS.Services.Evaluators;
 using VBMS.ViewModels.Components;
 using VBMS.Views;
 
@@ -19,6 +19,7 @@ namespace VBMS.ViewModels
         [ObservableProperty]
         private string _rackName = string.Empty;
 
+        // FDS 보드 자체 하드웨어 모듈 온도
         [ObservableProperty]
         private double _temperature;
 
@@ -53,11 +54,24 @@ namespace VBMS.ViewModels
         public ObservableCollection<string> BayLabels { get; } = new();
         public ObservableCollection<string> LevelLabels { get; } = new();
 
-        // ⭐ XAML 및 RackDetailViewModel 연동을 위한 간소화된 연(Bay) 라벨 목록
+        // XAML 및 RackDetailViewModel 연동을 위한 간소화된 연(Bay) 라벨 목록
         public IEnumerable<string> SimplifiedBayLabels =>
             GridColumns > 0
                 ? Enumerable.Range(1, GridColumns).Select(i => $"{i}연")
                 : Enumerable.Empty<string>();
+
+        /// <summary>
+        /// 미연결(0.0℃) 셀을 제외한 실제 수신 노드들의 실시간 평균 온도
+        /// </summary>
+        public double AverageCellTemperature
+        {
+            get
+            {
+                if (CellList == null || CellList.Count == 0) return 0.0;
+                var activeCells = CellList.Where(c => c.Temperature > 0).ToList();
+                return activeCells.Count > 0 ? activeCells.Average(c => c.Temperature) : 0.0;
+            }
+        }
 
         public RackViewModel(string name, int columns, int rows, double temp)
             : this(name, columns, rows, temp, null)
@@ -145,10 +159,12 @@ namespace VBMS.ViewModels
                         LocalBay = 0,
                         DetectorKey = string.Empty,
                         CellColor = "#9E9E9E",
-                        CellTooltip = $"[ 위치: {bay}연 {level}단 ] 수신 대기 중..."
+                        CellTooltip = $"[ 위치: {bay}연 {level}단 ] 수신 대기 중...",
+                        Temperature = 0.0
                     });
                 }
             }
+
             BayLabels.Clear();
             for (int bay = 1; bay <= columns; bay++)
             {
@@ -168,13 +184,12 @@ namespace VBMS.ViewModels
                 LevelLabels.Add($"{level:00}단");
             }
 
-            // GridColumns가 변경되었음을 UI에 통지
             OnPropertyChanged(nameof(SimplifiedBayLabels));
+            OnPropertyChanged(nameof(AverageCellTemperature));
         }
 
         /// <summary>
-        /// ⭐ 인자 3개 지원 오버로드 메서드
-        /// 수신 데이터를 받아 CellViewModel 상태를 갱신하고, 해당 랙 내 화재 발생 여부를 반환합니다.
+        /// 수신 데이터를 받아 CellViewModel 상태를 갱신합니다.
         /// </summary>
         public bool UpdateDetectorCells(int bayOffset, List<DetectorData> detectors, IFireSignalEvaluator? evaluator)
         {
@@ -198,6 +213,9 @@ namespace VBMS.ViewModels
                 targetCell.LocalBay = det.Bay;
                 targetCell.Level = det.Level;
                 targetCell.DetectorKey = $"{det.BoardId:D3}_{det.Bay:D2}_{det.Level:D2}";
+
+                // 개별 셀 온도 갱신 (CellViewModel의 INotifyPropertyChanged에 의해 화면에 즉시 반영)
+                targetCell.Temperature = det.Temperature;
 
                 // 신호 평가 (2: 고온/온도화재, 1: 연기화재, 0: 정상)
                 byte fireStatus = evaluator?.Evaluate(det.Status, det.Temperature) ?? 0;
@@ -238,6 +256,9 @@ namespace VBMS.ViewModels
 
                 targetCell.CellTooltip = $"[ 위치: {targetCell.Bay}연 {targetCell.Level}단 ]\n• 센서 ID: #{det.Index}\n• 상태: {statusText}\n• 온도: {det.Temperature:F1}℃";
             }
+
+            // 헤더 평균 온도 수치만 갱신 통지
+            OnPropertyChanged(nameof(AverageCellTemperature));
 
             return hasAnyFire;
         }

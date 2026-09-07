@@ -134,9 +134,9 @@ namespace VBMS.Repositories
             }
         }
 
-        public void SaveDumpBatch(IEnumerable<(DetectorData Data, DateTime ReceivedAt)> items)
+        public void SaveDumpBatch(IEnumerable<(int Line, int Bay, DetectorData Data, DateTime ReceivedAt)> items)
         {
-            var itemList = items as IList<(DetectorData Data, DateTime ReceivedAt)> ?? items.ToList();
+            var itemList = items as IList<(int Line, int Bay, DetectorData Data, DateTime ReceivedAt)> ?? items.ToList();
             if (itemList.Count == 0) return;
 
             _dbSemaphore.Wait();
@@ -149,13 +149,13 @@ namespace VBMS.Repositories
                 foreach (var item in itemList)
                 {
                     var row = appender.CreateRow();
-                    row.AppendValue(item.ReceivedAt);
-                    row.AppendValue(item.Data.Bay);
-                    row.AppendValue(item.Data.Level);
-                    row.AppendValue(item.Data.BoardId);
-                    row.AppendValue(item.Data.Temperature);
-                    row.AppendValue((item.Data.Status & 0x01) != 0); // is_fire
-                    row.AppendValue((item.Data.Status & 0x02) != 0); // is_error
+                    row.AppendValue(item.ReceivedAt);                   // 1. received_at (수신 시간)
+                    row.AppendValue(item.Bay);                          // 2. bay (전체 랙 기준 연, 예: 32)
+                    row.AppendValue(item.Data.Level);                   // 3. level (단, 예: 6)
+                    row.AppendValue(item.Line);                         // 4. row_num (Line 번호, 예: 1)
+                    row.AppendValue(item.Data.Temperature);             // 5. temperature
+                    row.AppendValue((item.Data.Status & 0x01) != 0);    // 6. is_fire
+                    row.AppendValue((item.Data.Status & 0x02) != 0);    // 7. is_error
                     row.EndRow();
                 }
             }

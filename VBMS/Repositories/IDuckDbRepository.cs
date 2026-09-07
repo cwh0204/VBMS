@@ -30,7 +30,7 @@ namespace VBMS.Repositories
         /// <summary>
         /// 화재/이상징후 발생 시 링버퍼 정밀 Dump 데이터 일괄 저장 (DuckDBAppender 고속 적재)
         /// </summary>
-        void SaveDumpBatch(IEnumerable<(DetectorData Data, DateTime ReceivedAt)> items);
+        void SaveDumpBatch(IEnumerable<(int Line, int Bay, DetectorData Data, DateTime ReceivedAt)> items);
 
         /// <summary>
         /// 감지기 텔레메트리 데이터 대량(Batch) 비동기 저장 (DuckDBAppender 고속 적재)

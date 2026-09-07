@@ -2,7 +2,6 @@
 
 namespace VBMS.ViewModels.Components
 {
-    // ⭐ partial 키워드가 반드시 있어야 [ObservableProperty]가 PascalCase 프로퍼티를 자동 생성합니다.
     public partial class CellViewModel : ObservableObject
     {
         [ObservableProperty]
@@ -25,6 +24,9 @@ namespace VBMS.ViewModels.Components
 
         [ObservableProperty]
         private string _cellTooltip = string.Empty;
+
+        [ObservableProperty]
+        private double _temperature;
 
         public void ResetSensor()
         {

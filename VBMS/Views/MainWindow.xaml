@@ -48,7 +48,7 @@
                     <TextBlock Text="VBMS" FontSize="14" FontWeight="Bold" 
                                Foreground="{DynamicResource MaterialDesignBody}" Margin="0,0,12,0" VerticalAlignment="Center"/>
 
-                    <TextBlock Text="|   배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" 
+                    <TextBlock Text="|    배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" 
                                Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                 </StackPanel>
 
@@ -57,7 +57,8 @@
                     <TextBlock Text="Sample" FontWeight="SemiBold" Margin="0,0,16,0" VerticalAlignment="Center"
                                Foreground="{DynamicResource MaterialDesignBody}"/>
 
-                    <TextBlock Text="2026-08-10 11:15:00" FontWeight="Medium" Margin="0,0,16,0" VerticalAlignment="Center" 
+                    <!-- ⭐ 실시간 초 단위 시계 바인딩 -->
+                    <TextBlock Text="{Binding CurrentTime}" FontWeight="Medium" Margin="0,0,16,0" VerticalAlignment="Center" 
                                Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
 
                     <!-- ☀️/🌙 라이트/다크 모드 전환 토글 버튼 -->
@@ -66,17 +67,13 @@
                                   Command="{Binding ToggleThemeCommand}"
                                   ToolTip="테마 전환 (라이트 / 다크 모드)"
                                   Margin="0,0,8,0">
-                        <materialDesign:PackIcon Width="20" Height="20">
+                        <materialDesign:PackIcon Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}">
                             <materialDesign:PackIcon.Style>
                                 <Style TargetType="materialDesign:PackIcon">
-                                    <!-- 기본값: 라이트모드 (낮/해) -->
                                     <Setter Property="Kind" Value="WeatherSunny"/>
-                                    <Setter Property="Foreground" Value="#FF9800"/>
                                     <Style.Triggers>
-                                        <!-- 다크모드 활성화 시 (밤/달) -->
-                                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=IsChecked}" Value="True">
+                                        <DataTrigger Binding="{Binding IsDarkMode}" Value="True">
                                             <Setter Property="Kind" Value="WeatherNight"/>
-                                            <Setter Property="Foreground" Value="#FFD700"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -84,14 +81,17 @@
                         </materialDesign:PackIcon>
                     </ToggleButton>
 
+                    <!-- 이벤트 로그 버튼 -->
                     <Button Style="{StaticResource MaterialDesignIconButton}" 
                             ToolTip="이벤트 로그 팝업" 
                             Command="{Binding OpenDataInquiryCommand}"
                             Margin="0,0,4,0">
-                        <materialDesign:PackIcon Kind="ViewList" Foreground="{DynamicResource MaterialDesignBody}"/>
+                        <materialDesign:PackIcon Kind="ViewList" Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
+
+                    <!-- 설정 버튼 -->
                     <Button Style="{StaticResource MaterialDesignIconButton}" ToolTip="설정">
-                        <materialDesign:PackIcon Kind="Cog" Foreground="{DynamicResource MaterialDesignBody}"/>
+                        <materialDesign:PackIcon Kind="Cog" Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
                 </StackPanel>
             </DockPanel>
@@ -134,7 +134,7 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 1. 드라이브 용량 모니터링 (가로 2열) -->
+                    <!-- 1. 드라이브 용량 모니터링 (실시간 바인딩) -->
                     <Grid Grid.Row="0" Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -146,8 +146,10 @@
                         <StackPanel Grid.Column="0">
                             <TextBlock Text="C 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource MaterialDesignBody}"/>
-                            <ProgressBar Value="84" Height="6" Margin="0,4,0,0" Foreground="{DynamicResource PrimaryHueMidBrush}"/>
-                            <TextBlock Text="237GB 중 196GB 사용 가능" FontSize="10" Margin="0,2,0,0" 
+                            <!-- ⭐ 실시간 C 드라이브 사용률 프로그레스바 -->
+                            <ProgressBar Value="{Binding CDriveUsagePercent}" Height="6" Margin="0,4,0,0" Foreground="{DynamicResource PrimaryHueMidBrush}"/>
+                            <!-- ⭐ 실시간 C 드라이브 용량 텍스트 -->
+                            <TextBlock Text="{Binding CDriveStatusText}" FontSize="10" Margin="0,2,0,0" 
                                        Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
 
@@ -155,8 +157,10 @@
                         <StackPanel Grid.Column="2">
                             <TextBlock Text="D 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource MaterialDesignBody}"/>
-                            <ProgressBar Value="0" Height="6" Margin="0,4,0,0" Foreground="#4CAF50"/>
-                            <TextBlock Text="1862GB 중 1862GB 사용 가능" FontSize="10" Margin="0,2,0,0" 
+                            <!-- ⭐ 실시간 D 드라이브 사용률 프로그레스바 -->
+                            <ProgressBar Value="{Binding DDriveUsagePercent}" Height="6" Margin="0,4,0,0" Foreground="#4CAF50"/>
+                            <!-- ⭐ 실시간 D 드라이브 용량 텍스트 -->
+                            <TextBlock Text="{Binding DDriveStatusText}" FontSize="10" Margin="0,2,0,0" 
                                        Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
                     </Grid>
@@ -186,7 +190,7 @@
                         </DataGrid.ColumnHeaderStyle>
 
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="ROW" Width="60" Binding="{Binding Row}"/>
+                            <DataGridTextColumn Header="Line" Width="60" Binding="{Binding Row}"/>
                             <DataGridTextColumn Header="BAY" Width="60" Binding="{Binding Bay}"/>
                             <DataGridTextColumn Header="LEVEL" Width="60" Binding="{Binding Level}"/>
                             <DataGridTextColumn Header="CONTENT" Width="*" Binding="{Binding Content}"/>

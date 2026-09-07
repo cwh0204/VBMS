@@ -7,25 +7,31 @@
         Height="900" Width="1450"
         MinHeight="750" MinWidth="1100"
         WindowStartupLocation="CenterOwner"
-        Background="#F8FAFC">
+        Background="{DynamicResource MaterialDesignBackground}"
+        TextElement.Foreground="{DynamicResource MaterialDesignBody}"
+        TextElement.FontWeight="Regular"
+        FontFamily="{materialDesign:MaterialDesignFont}"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
 
     <Window.Resources>
-        <!-- DataGrid 헤더 스타일 -->
+        <!-- 테마 적응형 DataGrid 헤더 스타일 -->
         <Style x:Key="ModernGridHeader" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#334155"/>
-            <Setter Property="Foreground" Value="#F8FAFC"/>
+            <Setter Property="Background" Value="{DynamicResource MaterialDesignBackground}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MaterialDesignBody}"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="11"/>
             <Setter Property="Height" Value="32"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="BorderBrush" Value="#475569"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource MaterialDesignDivider}"/>
         </Style>
 
-        <!-- DataGrid 셀 스타일 -->
+        <!-- 테마 적응형 DataGrid 셀 스타일 -->
         <Style x:Key="ModernGridCell" TargetType="DataGridCell">
             <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="Foreground" Value="{DynamicResource MaterialDesignBody}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="DataGridCell">
@@ -35,20 +41,26 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource PrimaryHueLightBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryHueMidBrush}"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
-        <!-- DataGrid 행 스타일 -->
+        <!-- 테마 적응형 DataGrid 행 스타일 -->
         <Style x:Key="ModernGridRow" TargetType="DataGridRow">
-            <Setter Property="Background" Value="#1E293B"/>
-            <Setter Property="Foreground" Value="#F1F5F9"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource MaterialDesignBody}"/>
             <Setter Property="Height" Value="30"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#334155"/>
+                    <Setter Property="Background" Value="{DynamicResource MaterialDesignDivider}"/>
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#0284C7"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Background" Value="{DynamicResource PrimaryHueLightBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource PrimaryHueMidBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -57,23 +69,45 @@
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- Row 0: 상단 필터 바 -->
             <RowDefinition Height="1.2*"/>
+            <!-- Row 1: 트렌드 차트 -->
             <RowDefinition Height="1*"/>
+            <!-- Row 2: 하단 2열 로그 그리드 -->
         </Grid.RowDefinitions>
 
-        <!-- Row 0: Top Bar -->
-        <Border Grid.Row="0" Background="#0F172A" CornerRadius="6" Padding="14,10" Margin="0,0,0,10">
-            <DockPanel>
+        <!-- ========================================================================= -->
+        <!-- Row 0: 상단 검색 및 필터 헤더 카드 -->
+        <!-- ========================================================================= -->
+        <materialDesign:Card Grid.Row="0" Margin="0,0,0,10" Padding="16,8" 
+                             UniformCornerRadius="8" materialDesign:ElevationAssist.Elevation="Dp1"
+                             Background="{DynamicResource MaterialDesignPaper}">
+            <DockPanel LastChildFill="False">
+                <!-- 좌측 타이틀 및 전역 날짜 검색 -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                    <materialDesign:PackIcon Kind="ChartLine" Width="22" Height="22" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="데이터 조회 (DATA INQUIRY)" FontSize="16" FontWeight="Bold" Foreground="#FFFFFF" VerticalAlignment="Center" Margin="0,0,25,0"/>
+                    <materialDesign:PackIcon Kind="ChartLine" Width="22" Height="22" 
+                                             Foreground="{DynamicResource MaterialDesignBody}" 
+                                             VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="데이터 조회 (DATA INQUIRY)" FontSize="16" FontWeight="Bold" 
+                               Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center" Margin="0,0,24,0"/>
 
-                    <TextBlock Text="조회 기간" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" FontSize="13"/>
-                    <DatePicker SelectedDate="{Binding GlobalStartDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
-                    <TextBlock Text="~" Foreground="#94A3B8" VerticalAlignment="Center" Margin="8,0" FontWeight="Bold"/>
-                    <DatePicker SelectedDate="{Binding GlobalEndDate}" Width="120" Height="32" Background="White" VerticalContentAlignment="Center" Padding="6,0"/>
+                    <TextBlock Text="조회 기간" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7" 
+                               VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold" FontSize="12"/>
 
-                    <Button Command="{Binding SearchAllCommand}" Margin="12,0,0,0" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="32" Padding="16,0">
+                    <DatePicker SelectedDate="{Binding GlobalStartDate}" Width="125" Height="30" 
+                                VerticalContentAlignment="Center" Padding="4,0"
+                                Foreground="{DynamicResource MaterialDesignBody}"/>
+
+                    <TextBlock Text="~" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.6" 
+                               VerticalAlignment="Center" Margin="8,0" FontWeight="Bold"/>
+
+                    <DatePicker SelectedDate="{Binding GlobalEndDate}" Width="125" Height="30" 
+                                VerticalContentAlignment="Center" Padding="4,0"
+                                Foreground="{DynamicResource MaterialDesignBody}"/>
+
+                    <Button Command="{Binding SearchAllCommand}" Margin="14,0,0,0" 
+                            Style="{StaticResource MaterialDesignRaisedButton}"
+                            Height="32" Padding="14,0" materialDesign:ButtonAssist.CornerRadius="4">
                         <StackPanel Orientation="Horizontal">
                             <materialDesign:PackIcon Kind="Magnify" Width="16" Height="16" VerticalAlignment="Center" Margin="0,0,6,0"/>
                             <TextBlock Text="전체 조회" FontWeight="Bold"/>
@@ -81,52 +115,54 @@
                     </Button>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <materialDesign:PackIcon Kind="ClockOutline" Width="18" Height="18" Foreground="#38BDF8" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <TextBlock Text="{Binding CurrentTimeString}" Foreground="#F8FAFC" FontWeight="Bold" FontSize="15" VerticalAlignment="Center"/>
+                <!-- 우측 시계 표시 -->
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <materialDesign:PackIcon Kind="ClockOutline" Width="18" Height="18" 
+                                             Foreground="{DynamicResource MaterialDesignBody}" 
+                                             VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="{Binding CurrentTimeString}" Foreground="{DynamicResource MaterialDesignBody}" 
+                               FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
                 </StackPanel>
             </DockPanel>
-        </Border>
+        </materialDesign:Card>
 
+        <!-- ========================================================================= -->
         <!-- Row 1: Section 1 - LiveCharts2 라인 그래프 영역 -->
-        <Border Grid.Row="1" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12" Margin="0,0,0,10">
+        <!-- ========================================================================= -->
+        <materialDesign:Card Grid.Row="1" Margin="0,0,0,10" Padding="16,14" 
+                             UniformCornerRadius="8" materialDesign:ElevationAssist.Elevation="Dp1"
+                             Background="{DynamicResource MaterialDesignPaper}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <!-- Row 0: 타이틀 바 (높이 자동) -->
                     <RowDefinition Height="*"/>
+                    <!-- Row 1: 차트 본체 (남은 높이 채움) -->
                 </Grid.RowDefinitions>
 
-                <!-- 차트 타이틀 및 시간별/일별 선택 라디오 버튼 -->
-                <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                <!-- 차트 타이틀 바 (하단 마진 12px로 텍스트 겹침 방지) -->
+                <DockPanel Grid.Row="0" Margin="0,0,0,12">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-                        <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
-                        <TextBlock Text="1. 센서 모니터링 및 트렌드 분석 (Summary Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <RadioButton Content="시간별" 
-                                     IsChecked="{Binding IsHourlySelected}" 
-                                     GroupName="ChartInterval" 
-                                     Margin="0,0,12,0" 
-                                     FontWeight="SemiBold" 
-                                     Foreground="#334155"/>
-                        <RadioButton Content="일별" 
-                                     IsChecked="{Binding IsDailySelected}" 
-                                     GroupName="ChartInterval" 
-                                     FontWeight="SemiBold" 
-                                     Foreground="#334155"/>
+                        <Border Width="4" Height="16" Background="{DynamicResource PrimaryHueMidBrush}" Margin="0,0,8,0" CornerRadius="2"/>
+                        <TextBlock Text="1. 센서 모니터링 및 트렌드 분석 (Summary Logs)" FontWeight="Bold" FontSize="13" 
+                                   Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </DockPanel>
 
+                <!-- ⭐ Background="Transparent" 추가로 기본 흰색 박스 제거 -->
                 <lvc:CartesianChart Grid.Row="1" 
+                                    Background="Transparent"
                                     Series="{Binding TemperatureSeries}"
                                     XAxes="{Binding XAxes}"
                                     YAxes="{Binding YAxes}"
+                                    LegendTextPaint="{Binding LegendTextPaint}"
                                     LegendPosition="Right"/>
             </Grid>
-        </Border>
+        </materialDesign:Card>
 
-        <!-- Row 2: Section 2 & 3 - 2분할 그리드 -->
+        <!-- ========================================================================= -->
+        <!-- Row 2: Section 2 & 3 - 하단 2열 이력 데이터그리드 -->
+        <!-- ========================================================================= -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="1*"/>
@@ -134,8 +170,10 @@
                 <ColumnDefinition Width="1*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 하단 좌측: Event 로그 -->
-            <Border Grid.Column="0" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
+            <!-- [하단 좌측] 이벤트 및 알람 이력 -->
+            <materialDesign:Card Grid.Column="0" Padding="14,12" 
+                                 UniformCornerRadius="8" materialDesign:ElevationAssist.Elevation="Dp1"
+                                 Background="{DynamicResource MaterialDesignPaper}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -144,20 +182,28 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <Border Width="4" Height="16" Background="#0284C7" Margin="0,0,8,0" CornerRadius="2"/>
-                        <TextBlock Text="2. 이벤트 및 알람 이력 (Event Logs)" FontWeight="Bold" FontSize="14" Foreground="#0F172A" VerticalAlignment="Center"/>
+                        <Border Width="4" Height="16" Background="{DynamicResource PrimaryHueMidBrush}" Margin="0,0,8,0" CornerRadius="2"/>
+                        <TextBlock Text="2. 이벤트 및 알람 이력 (Event Logs)" FontWeight="Bold" FontSize="13" 
+                                   Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
-                        <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Foreground="#475569" FontWeight="SemiBold"/>
-                        <DatePicker SelectedDate="{Binding EventStartDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="#475569"/>
-                        <DatePicker SelectedDate="{Binding EventEndDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" 
+                                   Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7" FontWeight="SemiBold"/>
+                        <DatePicker SelectedDate="{Binding EventStartDate}" Width="110" Height="28" FontSize="11" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.6"/>
+                        <DatePicker SelectedDate="{Binding EventEndDate}" Width="110" Height="28" FontSize="11" VerticalContentAlignment="Center"/>
 
-                        <Button Command="{Binding SearchEventsCommand}" Background="#0284C7" BorderBrush="#0284C7" Foreground="White" Height="28" Padding="10,0" Margin="6,0,0,0" FontSize="11">
+                        <Button Command="{Binding SearchEventsCommand}" 
+                                Style="{StaticResource MaterialDesignRaisedButton}"
+                                Height="28" Padding="10,0" Margin="8,0,0,0" FontSize="11"
+                                materialDesign:ButtonAssist.CornerRadius="4">
                             <TextBlock Text="검색"/>
                         </Button>
-                        <Button Command="{Binding ExportEventsExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="8,0" Margin="4,0,0,0" FontSize="11">
+                        <Button Command="{Binding ExportEventsExcelCommand}" 
+                                Style="{StaticResource MaterialDesignOutlinedButton}" 
+                                Height="28" Padding="10,0" Margin="4,0,0,0" FontSize="11"
+                                materialDesign:ButtonAssist.CornerRadius="4">
                             <TextBlock Text="엑셀 저장"/>
                         </Button>
                     </WrapPanel>
@@ -168,26 +214,30 @@
                               IsReadOnly="True"
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal"
-                              HorizontalGridLinesBrush="#334155"
+                              HorizontalGridLinesBrush="{DynamicResource MaterialDesignDivider}"
                               ColumnHeaderStyle="{StaticResource ModernGridHeader}"
                               RowStyle="{StaticResource ModernGridRow}"
                               CellStyle="{StaticResource ModernGridCell}"
-                              Background="#1E293B"
+                              Background="Transparent"
                               BorderThickness="1"
-                              BorderBrush="#334155">
+                              BorderBrush="{DynamicResource MaterialDesignDivider}"
+                              FontSize="11"
+                              RowHeight="30">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="발생 시간" Binding="{Binding DateTime, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" Width="140"/>
-                            <DataGridTextColumn Header="보드" Binding="{Binding Row}" Width="60"/>
-                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="60"/>
-                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="60"/>
+                            <DataGridTextColumn Header="라인" Binding="{Binding Row}" Width="55"/>
+                            <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="55"/>
+                            <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="55"/>
                             <DataGridTextColumn Header="내용" Binding="{Binding Content}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
-            </Border>
+            </materialDesign:Card>
 
-            <!-- 하단 우측: 이상징후 정밀 덤프 로그 -->
-            <Border Grid.Column="2" Background="White" CornerRadius="6" BorderBrush="#E2E8F0" BorderThickness="1" Padding="12">
+            <!-- [하단 우측] 이상징후 정밀 덤프 로그 -->
+            <materialDesign:Card Grid.Column="2" Padding="14,12" 
+                                 UniformCornerRadius="8" materialDesign:ElevationAssist.Elevation="Dp1"
+                                 Background="{DynamicResource MaterialDesignPaper}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -197,19 +247,28 @@
 
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
                         <Border Width="4" Height="16" Background="#EF4444" Margin="0,0,8,0" CornerRadius="2"/>
-                        <TextBlock Text="3. 이상징후 정밀 덤프 로그 (Detector Dump Logs)" FontWeight="Bold" FontSize="14" Foreground="#EF4444" VerticalAlignment="Center"/>
+                        <TextBlock Text="3. 이상징후 정밀 덤프 로그 (Detector Dump Logs)" FontWeight="Bold" FontSize="13" 
+                                   Foreground="#EF4444" VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <WrapPanel Grid.Row="1" Margin="0,0,0,8" VerticalAlignment="Center">
-                        <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" Foreground="#475569" FontWeight="SemiBold"/>
-                        <DatePicker SelectedDate="{Binding DumpStartDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
-                        <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="#475569"/>
-                        <DatePicker SelectedDate="{Binding DumpEndDate}" Width="105" Height="28" Background="White" FontSize="11" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="날짜" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" 
+                                   Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7" FontWeight="SemiBold"/>
+                        <DatePicker SelectedDate="{Binding DumpStartDate}" Width="110" Height="28" FontSize="11" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="~" VerticalAlignment="Center" Margin="6,0" Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.6"/>
+                        <DatePicker SelectedDate="{Binding DumpEndDate}" Width="110" Height="28" FontSize="11" VerticalContentAlignment="Center"/>
 
-                        <Button Command="{Binding SearchDumpLogsCommand}" Background="#EF4444" BorderBrush="#EF4444" Foreground="White" Height="28" Padding="10,0" Margin="6,0,0,0" FontSize="11">
+                        <Button Command="{Binding SearchDumpLogsCommand}" 
+                                Background="#EF4444" BorderBrush="#EF4444" Foreground="White" 
+                                Height="28" Padding="10,0" Margin="8,0,0,0" FontSize="11"
+                                Style="{StaticResource MaterialDesignRaisedButton}"
+                                materialDesign:ButtonAssist.CornerRadius="4">
                             <TextBlock Text="검색"/>
                         </Button>
-                        <Button Command="{Binding ExportDumpExcelCommand}" Style="{StaticResource MaterialDesignOutlinedButton}" Height="28" Padding="8,0" Margin="4,0,0,0" FontSize="11">
+                        <Button Command="{Binding ExportDumpExcelCommand}" 
+                                Style="{StaticResource MaterialDesignOutlinedButton}" 
+                                Height="28" Padding="10,0" Margin="4,0,0,0" FontSize="11"
+                                materialDesign:ButtonAssist.CornerRadius="4">
                             <TextBlock Text="엑셀 저장"/>
                         </Button>
                     </WrapPanel>
@@ -220,16 +279,18 @@
                               IsReadOnly="True"
                               HeadersVisibility="Column"
                               GridLinesVisibility="Horizontal"
-                              HorizontalGridLinesBrush="#334155"
+                              HorizontalGridLinesBrush="{DynamicResource MaterialDesignDivider}"
                               ColumnHeaderStyle="{StaticResource ModernGridHeader}"
                               RowStyle="{StaticResource ModernGridRow}"
                               CellStyle="{StaticResource ModernGridCell}"
-                              Background="#1E293B"
+                              Background="Transparent"
                               BorderThickness="1"
-                              BorderBrush="#334155">
+                              BorderBrush="{DynamicResource MaterialDesignDivider}"
+                              FontSize="11"
+                              RowHeight="30">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="수신 시간" Binding="{Binding ReceivedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss.fff}}" Width="150"/>
-                            <DataGridTextColumn Header="보드" Binding="{Binding Row}" Width="50"/>
+                            <DataGridTextColumn Header="라인" Binding="{Binding Row}" Width="50"/>
                             <DataGridTextColumn Header="연" Binding="{Binding Bay}" Width="50"/>
                             <DataGridTextColumn Header="단" Binding="{Binding Level}" Width="50"/>
                             <DataGridTextColumn Header="온도(°C)" Binding="{Binding Temperature, StringFormat={}{0:N1}}" Width="70"/>
@@ -238,7 +299,7 @@
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
-            </Border>
+            </materialDesign:Card>
         </Grid>
     </Grid>
 </Window>
