@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
-        Title="{Binding Rack.RackName, StringFormat='{}랙 상세 관제 콘솔 - {0}'}" 
+        Title="{Binding WindowTitle}" 
         Height="840" Width="1600"
         MinHeight="720" MinWidth="1150"
         WindowStartupLocation="CenterOwner"
@@ -70,8 +70,7 @@
 
                     <!-- 센서 평균 온도 뱃지 -->
                     <Border Background="{DynamicResource MaterialDesignDivider}" CornerRadius="12" 
-                            Height="26" Padding="10,0" Margin="12,0,0,0" VerticalAlignment="Center"
-                            ToolTip="{Binding Rack.Temperature, StringFormat='{}FDS 보드 기판 모듈 온도: {0:F1}℃'}">
+                            Height="26" Padding="10,0" Margin="12,0,0,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <materialDesign:PackIcon Kind="Thermometer" Width="14" Height="14" 
                                                      Foreground="{DynamicResource MaterialDesignBody}" 
@@ -83,7 +82,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- ⭐ 설비 상태 뱃지 (Rack. 경로 수정 완료) -->
+                    <!-- 설비 상태 뱃지 -->
                     <Border Background="{Binding Rack.RackStatusBgColor}" CornerRadius="12" 
                             Height="26" Padding="10,0" Margin="8,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Rack.RackStatusText, FallbackValue='대기'}" FontWeight="Bold" FontSize="11" 
@@ -95,20 +94,30 @@
         </materialDesign:Card>
 
         <!-- ========================================================================= -->
-        <!-- Row 1: 16단위 빠른 구역 이동 세그먼트 바 -->
+        <!-- Row 1: 16단위 빠른 구역 이동 세그먼트 바 (다국어 라벨 적용) -->
         <!-- ========================================================================= -->
         <materialDesign:Card Grid.Row="1" Margin="0,0,0,10" Padding="10,6" 
                              UniformCornerRadius="6" materialDesign:ElevationAssist.Elevation="Dp1"
                              Background="{DynamicResource MaterialDesignPaper}">
             <DockPanel LastChildFill="False">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="구역 스냅 이동" VerticalAlignment="Center" FontSize="11" FontWeight="Bold" 
+                    <TextBlock Text="{DynamicResource Str_SnapJump}" VerticalAlignment="Center" FontSize="11" FontWeight="Bold" 
                                Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.6" Margin="6,0,12,0"/>
-                    <Button Style="{StaticResource SegmentTabButtonStyle}" Content="01 ~ 16연" Tag="1" Click="JumpBay_Click"/>
-                    <Button Style="{StaticResource SegmentTabButtonStyle}" Content="17 ~ 32연" Tag="17" Click="JumpBay_Click"/>
-                    <Button Style="{StaticResource SegmentTabButtonStyle}" Content="33 ~ 48연" Tag="33" Click="JumpBay_Click"/>
-                    <Button Style="{StaticResource SegmentTabButtonStyle}" Content="49 ~ 64연" Tag="49" Click="JumpBay_Click"/>
-                    <Button Style="{StaticResource SegmentTabButtonStyle}" Content="65 ~ 70연" Tag="65" Click="JumpBay_Click"/>
+                    <Button Style="{StaticResource SegmentTabButtonStyle}" Tag="1" Click="JumpBay_Click">
+                        <TextBlock><Run Text="01 ~ 16 "/><Run Text="{DynamicResource Str_UnitBay}"/></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource SegmentTabButtonStyle}" Tag="17" Click="JumpBay_Click">
+                        <TextBlock><Run Text="17 ~ 32 "/><Run Text="{DynamicResource Str_UnitBay}"/></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource SegmentTabButtonStyle}" Tag="33" Click="JumpBay_Click">
+                        <TextBlock><Run Text="33 ~ 48 "/><Run Text="{DynamicResource Str_UnitBay}"/></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource SegmentTabButtonStyle}" Tag="49" Click="JumpBay_Click">
+                        <TextBlock><Run Text="49 ~ 64 "/><Run Text="{DynamicResource Str_UnitBay}"/></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource SegmentTabButtonStyle}" Tag="65" Click="JumpBay_Click">
+                        <TextBlock><Run Text="65 ~ 70 "/><Run Text="{DynamicResource Str_UnitBay}"/></TextBlock>
+                    </Button>
                 </StackPanel>
             </DockPanel>
         </materialDesign:Card>
@@ -167,7 +176,7 @@
                                     <Border Width="52" Height="26" Margin="1,0" 
                                             Background="{DynamicResource MaterialDesignBackground}" 
                                             BorderBrush="{DynamicResource MaterialDesignDivider}"
-                                            BorderThickness="1"
+                                            BorderThickness="1" 
                                             CornerRadius="3">
                                         <TextBlock Text="{Binding}" FontSize="10" FontWeight="Bold" 
                                                    HorizontalAlignment="Center" VerticalAlignment="Center" 
@@ -192,7 +201,7 @@
 
                             <ListBox.ContextMenu>
                                 <ContextMenu>
-                                    <MenuItem Header="감지기 리셋" 
+                                    <MenuItem Header="{DynamicResource Str_ResetDetector}" 
                                               Command="{Binding ResetSelectedCellSensorCommand}"
                                               CommandParameter="{Binding SelectedCell}">
                                         <MenuItem.Icon>
@@ -300,11 +309,12 @@
                             <materialDesign:PackIcon Kind="ChartPie" Width="16" Height="16" 
                                                      Foreground="{DynamicResource MaterialDesignBody}" 
                                                      Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="셀 상태 요약" FontWeight="Bold" FontSize="12" 
+                            <TextBlock Text="{DynamicResource Str_CellSummary}" FontWeight="Bold" FontSize="12" 
                                        Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center"/>
                         </StackPanel>
+                        <!-- 전체 개수 뱃지 (다국어 포맷 바인딩) -->
                         <Border DockPanel.Dock="Right" Background="{DynamicResource MaterialDesignDivider}" CornerRadius="10" Padding="8,2">
-                            <TextBlock Text="{Binding TotalCount, StringFormat='{}전체 {0}개'}" FontSize="10" FontWeight="Bold" 
+                            <TextBlock Text="{Binding TotalCountText}" FontSize="10" FontWeight="Bold" 
                                        Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.8"/>
                         </Border>
                     </DockPanel>
@@ -315,35 +325,35 @@
                         <!-- 정상 -->
                         <Border Margin="2" Background="{DynamicResource MaterialDesignBackground}" CornerRadius="4" Padding="4,6">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="정상" FontSize="10" Foreground="{StaticResource ColorNormal}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_StatusNormal}" FontSize="10" Foreground="{StaticResource ColorNormal}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding NormalCount}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource ColorNormal}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
                         <!-- 통신오류 -->
                         <Border Margin="2" Background="{DynamicResource MaterialDesignBackground}" CornerRadius="4" Padding="4,6">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="통신오류" FontSize="10" Foreground="{StaticResource ColorCommError}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_StatusCommError}" FontSize="10" Foreground="{StaticResource ColorCommError}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding CommErrorCount}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource ColorCommError}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
                         <!-- 연기 -->
                         <Border Margin="2" Background="{DynamicResource MaterialDesignBackground}" CornerRadius="4" Padding="4,6">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="연기감지" FontSize="10" Foreground="{StaticResource ColorSmoke}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_StatusSmoke}" FontSize="10" Foreground="{StaticResource ColorSmoke}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding SmokeCount}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource ColorSmoke}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
                         <!-- 화재 -->
                         <Border Margin="2" Background="{DynamicResource MaterialDesignBackground}" CornerRadius="4" Padding="4,6">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="화재발생" FontSize="10" Foreground="{StaticResource ColorFire}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_StatusFire}" FontSize="10" Foreground="{StaticResource ColorFire}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding FireCount}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource ColorFire}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
                         <!-- 중지 -->
                         <Border Margin="2" Background="{DynamicResource MaterialDesignBackground}" CornerRadius="4" Padding="4,6">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock Text="사용중지" FontSize="10" Foreground="{StaticResource ColorDisabled}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_StatusDisabled}" FontSize="10" Foreground="{StaticResource ColorDisabled}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding DisabledCount}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource ColorDisabled}" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
@@ -367,17 +377,22 @@
                             <materialDesign:PackIcon Kind="InformationOutline" Width="16" Height="16" 
                                                      Foreground="{DynamicResource MaterialDesignBody}" 
                                                      Margin="0,0,6,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="선택 노드 진단" FontWeight="Bold" FontSize="12" 
+                            <TextBlock Text="{DynamicResource Str_SelectedNodeDiag}" FontWeight="Bold" FontSize="12" 
                                        Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center"/>
                         </StackPanel>
 
-                        <!-- 위치 뱃지 -->
+                        <!-- 위치 뱃지 (연/단 단위 다국어 Run 적용) -->
                         <Border DockPanel.Dock="Right" Background="{DynamicResource MaterialDesignDivider}" CornerRadius="10" Padding="8,2">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding SelectedCell.Bay, StringFormat='{} {0}연 ', FallbackValue='--연 '}" 
-                                           FontWeight="Bold" Foreground="{DynamicResource MaterialDesignBody}" FontSize="11" VerticalAlignment="Center"/>
-                                <TextBlock Text="{Binding SelectedCell.Level, StringFormat='{}{0:00}단', FallbackValue='--단'}" 
-                                           FontWeight="Bold" Foreground="{DynamicResource MaterialDesignBody}" FontSize="11" VerticalAlignment="Center"/>
+                                <TextBlock FontWeight="Bold" Foreground="{DynamicResource MaterialDesignBody}" FontSize="11" VerticalAlignment="Center">
+                                    <Run Text="{Binding SelectedCell.Bay, FallbackValue='--'}"/>
+                                    <Run Text="{DynamicResource Str_UnitBay}"/>
+                                    <Run Text=" "/>
+                                </TextBlock>
+                                <TextBlock FontWeight="Bold" Foreground="{DynamicResource MaterialDesignBody}" FontSize="11" VerticalAlignment="Center">
+                                    <Run Text="{Binding SelectedCell.Level, StringFormat='{}{0:00}', FallbackValue='--'}"/>
+                                    <Run Text="{DynamicResource Str_UnitLevel}"/>
+                                </TextBlock>
                             </StackPanel>
                         </Border>
                     </DockPanel>
@@ -392,7 +407,7 @@
 
                         <!-- 텔레메트리 텍스트 -->
                         <Border Grid.Column="0" Background="{DynamicResource MaterialDesignBackground}" 
-                                BorderBrush="{DynamicResource MaterialDesignDivider}" BorderThickness="1"
+                                BorderBrush="{DynamicResource MaterialDesignDivider}" BorderThickness="1" 
                                 CornerRadius="4" Padding="8" Margin="0,0,8,0">
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <TextBlock Text="{Binding SelectedCell.CellTooltip, FallbackValue='셀을 선택하면 상세 정보가 표시됩니다.'}" 
@@ -401,7 +416,7 @@
                             </ScrollViewer>
                         </Border>
 
-                        <!-- 리셋 버튼 -->
+                        <!-- 리셋 버튼 (다국어 리소스 적용) -->
                         <Button Grid.Column="1" 
                                 Style="{StaticResource MaterialDesignRaisedButton}" 
                                 Command="{Binding ResetSelectedCellSensorCommand}"
@@ -411,10 +426,10 @@
                                 Padding="8,0"
                                 VerticalAlignment="Stretch"
                                 materialDesign:ButtonAssist.CornerRadius="4"
-                                ToolTip="선택한 노드의 오류 상태를 리셋합니다.">
+                                ToolTip="{DynamicResource Str_ResetDetectorTooltip}">
                             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <materialDesign:PackIcon Kind="Refresh" Width="20" Height="20" HorizontalAlignment="Center" Margin="0,0,0,4"/>
-                                <TextBlock Text="감지기 리셋" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                <TextBlock Text="{DynamicResource Str_ResetDetector}" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center"/>
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -436,7 +451,7 @@
                         <materialDesign:PackIcon Kind="PaletteOutline" Width="16" Height="16" 
                                                  Foreground="{DynamicResource MaterialDesignBody}" 
                                                  Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="상태 범례" FontWeight="Bold" FontSize="12" 
+                        <TextBlock Text="{DynamicResource Str_StatusLegend}" FontWeight="Bold" FontSize="12" 
                                    Foreground="{DynamicResource MaterialDesignBody}" VerticalAlignment="Center"/>
                     </StackPanel>
 
@@ -445,23 +460,23 @@
                     <UniformGrid Grid.Row="2" Columns="2" Rows="3" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,4">
                             <Border Width="10" Height="10" Background="{StaticResource ColorNormal}" CornerRadius="2" Margin="0,0,6,0"/>
-                            <TextBlock Text="정상" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
+                            <TextBlock Text="{DynamicResource Str_StatusNormal}" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,4">
                             <Border Width="10" Height="10" Background="{StaticResource ColorCommError}" CornerRadius="2" Margin="0,0,6,0"/>
-                            <TextBlock Text="통신오류" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
+                            <TextBlock Text="{DynamicResource Str_StatusCommError}" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,4">
                             <Border Width="10" Height="10" Background="{StaticResource ColorSmoke}" CornerRadius="2" Margin="0,0,6,0"/>
-                            <TextBlock Text="연기감지" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
+                            <TextBlock Text="{DynamicResource Str_StatusSmoke}" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,4">
                             <Border Width="10" Height="10" Background="{StaticResource ColorFire}" CornerRadius="2" Margin="0,0,6,0"/>
-                            <TextBlock Text="화재발생" FontSize="11" FontWeight="Bold" Foreground="{StaticResource ColorFire}"/>
+                            <TextBlock Text="{DynamicResource Str_StatusFire}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource ColorFire}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="2,4">
                             <Border Width="10" Height="10" Background="{StaticResource ColorDisabled}" CornerRadius="2" Margin="0,0,6,0"/>
-                            <TextBlock Text="사용중지" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
+                            <TextBlock Text="{DynamicResource Str_StatusDisabled}" FontSize="11" Foreground="{DynamicResource MaterialDesignBody}"/>
                         </StackPanel>
                     </UniformGrid>
                 </Grid>

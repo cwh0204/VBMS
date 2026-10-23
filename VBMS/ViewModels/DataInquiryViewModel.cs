@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using LiveChartsCore;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 using SkiaSharp;
 using System;
@@ -16,6 +17,8 @@ using System.Windows.Threading;
 using VBMS.Models;
 using VBMS.Repositories;
 using VBMS.Services.Export;
+using VBMS.Services.Localization;
+using VBMS.Services.Settings;
 using VBMS.Services.Theme;
 
 namespace VBMS.ViewModels
@@ -24,6 +27,8 @@ namespace VBMS.ViewModels
     {
         private readonly IDetectorRepository _detectorRepository;
         private readonly IExcelExportService _excelExportService;
+        private readonly ISettingsService _settingsService;
+        private readonly ILocalizationService? _localizationService;
         private readonly DispatcherTimer _timer;
         private bool _disposed;
 
@@ -75,7 +80,6 @@ namespace VBMS.ViewModels
             set => SetProperty(ref _yAxes, value);
         }
 
-        // 범례 글자색 바인딩 프로퍼티 (테마 호환)
         [ObservableProperty]
         private SolidColorPaint? _legendTextPaint;
 
@@ -96,10 +100,19 @@ namespace VBMS.ViewModels
 
         public DataInquiryViewModel(
             IDetectorRepository detectorRepository,
-            IExcelExportService excelExportService)
+            IExcelExportService excelExportService,
+            ISettingsService settingsService,
+            ILocalizationService? localizationService = null)
         {
             _detectorRepository = detectorRepository ?? throw new ArgumentNullException(nameof(detectorRepository));
             _excelExportService = excelExportService ?? throw new ArgumentNullException(nameof(excelExportService));
+            _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+            _localizationService = localizationService ?? App.Services.GetService<ILocalizationService>();
+
+            if (_localizationService != null)
+            {
+                _localizationService.OnLanguageChanged += HandleLanguageChanged;
+            }
 
             _timer = new DispatcherTimer
             {
@@ -111,17 +124,33 @@ namespace VBMS.ViewModels
             _ = LoadAllDataFromDatabaseAsync();
         }
 
+        private void HandleLanguageChanged(string lang)
+        {
+            // 언어 변경 시 차트 범례/축 라벨 갱신
+            if (TemperatureSeries != null && TemperatureSeries.Length >= 2)
+            {
+                TemperatureSeries[0].Name = _localizationService?.GetString("Str_ChartAvgTemp") ?? "평균 온도 (°C)";
+                TemperatureSeries[1].Name = _localizationService?.GetString("Str_ChartMaxTemp") ?? "최고 온도 (°C)";
+            }
+
+            if (XAxes != null && XAxes.Length > 0)
+            {
+                XAxes[0].Name = _localizationService?.GetString("Str_ChartTimeAxis") ?? "측정 일시";
+            }
+
+            if (YAxes != null && YAxes.Length > 0)
+            {
+                YAxes[0].Name = _localizationService?.GetString("Str_ChartTempAxis") ?? "온도 (°C)";
+            }
+        }
+
         private static DateTime GetStartOfDay(DateTime date) => date.Date;
         private static DateTime GetEndOfDay(DateTime date) => date.Date.AddDays(1).AddSeconds(-1);
 
-        // ==========================================
-        // 테마별 SkiaSharp 차트 브러시 생성 헬퍼
-        // ==========================================
         private (SolidColorPaint textPaint, SolidColorPaint namePaint, SolidColorPaint separatorPaint) GetThemePaints()
         {
             bool isDark = ThemeService.Instance.CurrentTheme == AppTheme.Dark;
 
-            // 다크모드: 밝은 실버그레이 / 라이트모드: 차콜 슬레이트
             var textPaint = new SolidColorPaint(isDark ? new SKColor(226, 232, 240) : new SKColor(51, 65, 85));
             var namePaint = new SolidColorPaint(isDark ? new SKColor(148, 163, 184) : new SKColor(100, 116, 139));
             var separatorPaint = new SolidColorPaint(isDark ? new SKColor(71, 85, 105, 80) : new SKColor(226, 232, 240));
@@ -164,7 +193,7 @@ namespace VBMS.ViewModels
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[ERROR] LoadAllDataFromDatabaseAsync: {ex.Message}");
-                MessageBox.Show($"데이터 조회 중 오류가 발생했습니다: {ex.Message}", "데이터베이스 오류", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"데이터 조회 중 오류가 발생했습니다: {ex.Message}", "Database Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -179,6 +208,11 @@ namespace VBMS.ViewModels
             var rawLogs = await _detectorRepository.GetSummaryLogsAsync(null, start, end);
             var summaryLogs = rawLogs.OrderBy(x => x.Timestamp).ToList();
 
+            string timeAxisName = _localizationService?.GetString("Str_ChartTimeAxis") ?? "측정 일시";
+            string tempAxisName = _localizationService?.GetString("Str_ChartTempAxis") ?? "온도 (°C)";
+            string avgTempName = _localizationService?.GetString("Str_ChartAvgTemp") ?? "평균 온도 (°C)";
+            string maxTempName = _localizationService?.GetString("Str_ChartMaxTemp") ?? "최고 온도 (°C)";
+
             if (summaryLogs.Count == 0)
             {
                 TemperatureSeries = Array.Empty<ISeries>();
@@ -186,7 +220,7 @@ namespace VBMS.ViewModels
                 {
                     new Axis
                     {
-                        Name = "측정 일시",
+                        Name = timeAxisName,
                         TextSize = 12,
                         NamePaint = namePaint,
                         LabelsPaint = textPaint,
@@ -197,7 +231,7 @@ namespace VBMS.ViewModels
                 {
                     new Axis
                     {
-                        Name = "온도 (°C)",
+                        Name = tempAxisName,
                         TextSize = 12,
                         NamePaint = namePaint,
                         LabelsPaint = textPaint,
@@ -211,7 +245,6 @@ namespace VBMS.ViewModels
             DateTime maxTimestamp = summaryLogs.Last().Timestamp;
             TimeSpan actualDataSpan = maxTimestamp - minTimestamp;
 
-            // 데이터 구간에 맞추어 유연하게 자동 그룹화
             var groupedData = actualDataSpan switch
             {
                 var d when d.TotalHours <= 2 => summaryLogs
@@ -262,14 +295,14 @@ namespace VBMS.ViewModels
 
             var resultList = groupedData.OrderBy(x => x.Label).ToList();
 
-            var avgColor = new SKColor(14, 165, 233); // Sky Blue
-            var maxColor = new SKColor(239, 68, 68);  // Coral Red
+            var avgColor = new SKColor(14, 165, 233);
+            var maxColor = new SKColor(239, 68, 68);
 
             TemperatureSeries = new ISeries[]
             {
                 new LineSeries<double>
                 {
-                    Name = "평균 온도 (°C)",
+                    Name = avgTempName,
                     Values = resultList.Select(x => x.AvgTemp).ToArray(),
                     Stroke = new SolidColorPaint(avgColor, 2.5f),
                     Fill = null,
@@ -278,7 +311,7 @@ namespace VBMS.ViewModels
                 },
                 new LineSeries<double>
                 {
-                    Name = "최고 온도 (°C)",
+                    Name = maxTempName,
                     Values = resultList.Select(x => x.MaxTemp).ToArray(),
                     Stroke = new SolidColorPaint(maxColor, 2.5f),
                     Fill = null,
@@ -291,7 +324,7 @@ namespace VBMS.ViewModels
             {
                 new Axis
                 {
-                    Name = "측정 일시",
+                    Name = timeAxisName,
                     NamePaint = namePaint,
                     Labels = resultList.Select(x => x.Label).ToArray(),
                     LabelsPaint = textPaint,
@@ -305,7 +338,7 @@ namespace VBMS.ViewModels
             {
                 new Axis
                 {
-                    Name = "온도 (°C)",
+                    Name = tempAxisName,
                     NamePaint = namePaint,
                     LabelsPaint = textPaint,
                     Labeler = val => $"{val:N1} °C",
@@ -358,28 +391,31 @@ namespace VBMS.ViewModels
         }
 
         // ==========================================
-        // 5. 엑셀 내보내기 커맨드 (IExcelExportService 연동)
+        // 5. 엑셀 내보내기 커맨드 (설정 서비스 연동)
         // ==========================================
+
+        private string GetExportDirectory()
+        {
+            string dir = _settingsService.CurrentSettings.ExportDirectory;
+            return Directory.Exists(dir) ? dir : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        }
 
         [RelayCommand]
         private async Task ExportEventsExcelAsync()
         {
             if (EventLogs == null || EventLogs.Count == 0)
             {
-                MessageBox.Show("저장할 이벤트 로그 데이터가 없습니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Warning);
+                string noDataMsg = _localizationService?.GetString("Str_NoDataToExport") ?? "저장할 이벤트 로그 데이터가 없습니다.";
+                MessageBox.Show(noDataMsg, "VBMS", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            string defaultDir = Directory.Exists(@"D:\gtcsfile")
-                ? @"D:\gtcsfile"
-                : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-
             var dialog = new SaveFileDialog
             {
-                Title = "이벤트 로그 엑셀 저장",
+                Title = _localizationService?.GetString("Str_BtnExportExcel") ?? "이벤트 로그 엑셀 저장",
                 Filter = "Excel 파일 (*.xlsx)|*.xlsx",
-                FileName = $"VBMS_이벤트로그_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
-                InitialDirectory = defaultDir
+                FileName = $"VBMS_EventLogs_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                InitialDirectory = GetExportDirectory()
             };
 
             if (dialog.ShowDialog() != true) return;
@@ -388,11 +424,13 @@ namespace VBMS.ViewModels
             {
                 IsLoading = true;
                 await _excelExportService.ExportEventLogsAsync(dialog.FileName, EventLogs);
-                MessageBox.Show("이벤트 로그 엑셀 저장이 완료되었습니다.", "성공", MessageBoxButton.OK, MessageBoxImage.Information);
+                string okMsg = _localizationService?.GetString("Str_ExportSuccess") ?? "이벤트 로그 엑셀 저장이 완료되었습니다.";
+                MessageBox.Show(okMsg, "VBMS", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"엑셀 저장 중 오류가 발생했습니다: {ex.Message}", "저장 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+                string failMsg = _localizationService?.GetString("Str_ExportFail") ?? "엑셀 저장 중 오류가 발생했습니다: ";
+                MessageBox.Show($"{failMsg}{ex.Message}", "VBMS", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -405,20 +443,17 @@ namespace VBMS.ViewModels
         {
             if (DumpLogs == null || DumpLogs.Count == 0)
             {
-                MessageBox.Show("저장할 이상징후 덤프 로그 데이터가 없습니다.", "알림", MessageBoxButton.OK, MessageBoxImage.Warning);
+                string noDataMsg = _localizationService?.GetString("Str_NoDataToExport") ?? "저장할 이상징후 덤프 로그 데이터가 없습니다.";
+                MessageBox.Show(noDataMsg, "VBMS", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            string defaultDir = Directory.Exists(@"D:\gtcsfile")
-                ? @"D:\gtcsfile"
-                : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-
             var dialog = new SaveFileDialog
             {
-                Title = "이상징후 정밀 덤프 로그 엑셀 저장",
+                Title = _localizationService?.GetString("Str_BtnExportExcel") ?? "이상징후 정밀 덤프 로그 엑셀 저장",
                 Filter = "Excel 파일 (*.xlsx)|*.xlsx",
-                FileName = $"VBMS_덤프로그_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
-                InitialDirectory = defaultDir
+                FileName = $"VBMS_DumpLogs_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+                InitialDirectory = GetExportDirectory()
             };
 
             if (dialog.ShowDialog() != true) return;
@@ -427,11 +462,13 @@ namespace VBMS.ViewModels
             {
                 IsLoading = true;
                 await _excelExportService.ExportDumpLogsAsync(dialog.FileName, DumpLogs);
-                MessageBox.Show("이상징후 덤프 로그 엑셀 저장이 완료되었습니다.", "성공", MessageBoxButton.OK, MessageBoxImage.Information);
+                string okMsg = _localizationService?.GetString("Str_ExportSuccess") ?? "이상징후 덤프 로그 엑셀 저장이 완료되었습니다.";
+                MessageBox.Show(okMsg, "VBMS", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"엑셀 저장 중 오류가 발생했습니다: {ex.Message}", "저장 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+                string failMsg = _localizationService?.GetString("Str_ExportFail") ?? "엑셀 저장 중 오류가 발생했습니다: ";
+                MessageBox.Show($"{failMsg}{ex.Message}", "VBMS", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -443,6 +480,10 @@ namespace VBMS.ViewModels
         {
             if (!_disposed)
             {
+                if (_localizationService != null)
+                {
+                    _localizationService.OnLanguageChanged -= HandleLanguageChanged;
+                }
                 _timer.Stop();
                 _disposed = true;
             }

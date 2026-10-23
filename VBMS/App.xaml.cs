@@ -12,9 +12,11 @@ using VBMS.Repositories;
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
 using VBMS.Services.Export;
+using VBMS.Services.Localization;
 using VBMS.Services.OpcUa;
 using VBMS.Services.Orchestrators;
 using VBMS.Services.Parsers;
+using VBMS.Services.Settings;
 using VBMS.Services.Storage;
 using VBMS.Services.Theme;
 using VBMS.ViewModels;
@@ -25,7 +27,7 @@ namespace VBMS
     public partial class App : Application
     {
         private IHost? _host;
-        private static Mutex? _mutex; // 중복 실행 방지용 뮤텍스
+        private static Mutex? _mutex;
 
         public new static App Current => (App)Application.Current;
         public static IServiceProvider Services => Current._host!.Services;
@@ -42,10 +44,15 @@ namespace VBMS
                 })
                 .ConfigureServices((context, services) =>
                 {
+                    // 환경 설정 및 다국어 서비스
+                    services.AddSingleton<ILocalizationService, LocalizationService>();
+                    services.AddSingleton<ISettingsService, SettingsService>();
+                    services.AddSingleton<ThemeService>();
+
                     // Repositories (DuckDB)
                     services.AddSingleton<IDetectorRepository, DuckDbRepository>();
 
-                    // 1. TelemetryStorageService 싱글톤 + HostedService 동시 등록
+                    // TelemetryStorageService
                     services.AddSingleton<TelemetryStorageService>();
                     services.AddSingleton<ITelemetryStorageService>(sp => sp.GetRequiredService<TelemetryStorageService>());
                     services.AddHostedService(sp => sp.GetRequiredService<TelemetryStorageService>());
@@ -60,28 +67,34 @@ namespace VBMS
                     services.AddSingleton<ICrpDataParser, CrpDataParser>();
                     services.AddSingleton<IFdsDataOrchestrator, FdsDataOrchestrator>();
 
-                    services.AddSingleton<IFireSignalEvaluator>(sp => new FireSignalEvaluator(60.0));
+                    services.AddSingleton<IFireSignalEvaluator>(sp =>
+                    {
+                        var settings = sp.GetRequiredService<ISettingsService>().CurrentSettings;
+                        return new FireSignalEvaluator(
+                            settings.HighTempThreshold,
+                            settings.WarningTempThreshold,
+                            settings.DeltaTempThreshold);
+                    });
+
                     services.AddSingleton<IFireVerificationService, FireVerificationService>();
 
-                    // 2. OPC UA Server 및 HostedService 등록
+                    // OPC UA Server
                     services.AddSingleton<FdsOpcServer>();
                     services.AddHostedService<FdsOpcServerHostedService>();
 
-                    // Theme 설정 변경
-                    services.AddSingleton<ThemeService>();
+                    // 엑셀 내보내기
+                    services.AddSingleton<IExcelExportService, ExcelExportService>();
 
-                    // UI ViewModels & Windows
+                    // ViewModels & Windows
                     services.AddSingleton<MainWindowViewModel>();
                     services.AddTransient<RackDetailViewModel>();
                     services.AddTransient<DataInquiryViewModel>();
-
-                    // 엑셀 저장
-                    services.AddSingleton<IExcelExportService, ExcelExportService>();
+                    services.AddTransient<SettingsViewModel>();
 
                     services.AddTransient<MainWindow>();
                     services.AddTransient<RackDetailWindow>();
                     services.AddTransient<DataInquiryWindow>();
-
+                    services.AddTransient<SettingsWindow>();
                 })
                 .Build();
         }
@@ -90,7 +103,6 @@ namespace VBMS
         {
             base.OnStartup(e);
 
-            // 🌟 1. 중복 실행 체크 (DuckDB 파일 락 및 OPC UA 포트 충돌 방지)
             const string mutexName = "Global\\VBMS_FireMonitoringSystem_SingleInstance_Mutex";
             _mutex = new Mutex(true, mutexName, out bool createdNew);
 
@@ -103,10 +115,22 @@ namespace VBMS
 
             try
             {
-                // 🌟 2. 백그라운드 서비스(DuckDB, OPC UA 등) 먼저 시동
                 await _host!.StartAsync();
 
-                // 🌟 3. 서비스가 정상 시작되면 메인 화면 표시
+                // 언어 및 테마 복원
+                var settingsService = _host.Services.GetRequiredService<ISettingsService>();
+                var locService = _host.Services.GetRequiredService<ILocalizationService>();
+                var themeService = _host.Services.GetRequiredService<ThemeService>();
+
+                locService.SetLanguage(settingsService.CurrentSettings.Language);
+
+                bool isDark = settingsService.CurrentSettings.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase);
+                if ((isDark && themeService.CurrentTheme != AppTheme.Dark) ||
+                    (!isDark && themeService.CurrentTheme != AppTheme.Light))
+                {
+                    themeService.ToggleTheme();
+                }
+
                 var mainWindow = _host.Services.GetRequiredService<MainWindow>();
                 mainWindow.DataContext = _host.Services.GetRequiredService<MainWindowViewModel>();
                 mainWindow.Show();
@@ -115,20 +139,16 @@ namespace VBMS
             {
                 LogCrash("OnStartup 구동 중 예외 발생", ex);
                 MessageBox.Show($"시스템 시작 중 오류가 발생하여 프로그램을 종료합니다.\n\n오류 내용: {ex.Message}", "치명적 오류", MessageBoxButton.OK, MessageBoxImage.Error);
-
-                // 구동 실패 시 프로그램 즉시 종료
                 Shutdown();
             }
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
-            // 🌟 4. 교착 상태(Deadlock) 없는 안전한 백그라운드 서비스 정지
             if (_host != null)
             {
                 try
                 {
-                    // UI 스레드를 멈추지 않도록 별도 Task에서 StopAsync 실행 (최대 5초 대기)
                     Task.Run(async () =>
                     {
                         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -146,7 +166,6 @@ namespace VBMS
                 }
             }
 
-            // 뮤텍스 해제
             if (_mutex != null)
             {
                 try
@@ -188,7 +207,6 @@ namespace VBMS
             try
             {
                 string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash.log");
-                // ex.ToString()을 사용하여 스택 트레이스 및 하위 예외(InnerException)까지 상세히 기록
                 string content = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{context}]\n{ex}\n----------------------------------------\n";
                 File.AppendAllText(logPath, content);
             }

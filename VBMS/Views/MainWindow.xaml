@@ -8,7 +8,7 @@
         xmlns:components="clr-namespace:VBMS.Views.Components"
         xmlns:notifications="clr-namespace:Notification.Wpf.Controls;assembly=Notification.Wpf"
         mc:Ignorable="d"
-        Title="VBMS - 배터리 랙 통합 관제 시스템" Height="950" Width="1440"
+        Title="{DynamicResource Str_AppTitle}" Height="950" Width="1440"
         WindowState="Maximized"
         TextElement.Foreground="{DynamicResource MaterialDesignBody}"
         TextElement.FontWeight="Regular"
@@ -41,14 +41,14 @@
         <materialDesign:Card Grid.Row="0" Padding="16,8" Margin="0,0,0,10" UniformCornerRadius="6" 
                              materialDesign:ElevationAssist.Elevation="Dp1">
             <DockPanel LastChildFill="False">
-                <!-- 로고 및 시스템 타이틀 -->
+                <!-- 로고 및 시스템 타이틀 (다국어 적용) -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Test" FontSize="18" FontWeight="Bold" Foreground="#FFC107" Margin="0,0,4,0" VerticalAlignment="Center"/>
 
                     <TextBlock Text="VBMS" FontSize="14" FontWeight="Bold" 
                                Foreground="{DynamicResource MaterialDesignBody}" Margin="0,0,12,0" VerticalAlignment="Center"/>
 
-                    <TextBlock Text="|    배터리 랙 실시간 화재 및 안전 통합 관제 시스템" FontSize="13" VerticalAlignment="Center" 
+                    <TextBlock Text="{DynamicResource Str_AppSubTitle}" FontSize="13" VerticalAlignment="Center" 
                                Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                 </StackPanel>
 
@@ -57,15 +57,15 @@
                     <TextBlock Text="Sample" FontWeight="SemiBold" Margin="0,0,16,0" VerticalAlignment="Center"
                                Foreground="{DynamicResource MaterialDesignBody}"/>
 
-                    <!-- ⭐ 실시간 초 단위 시계 바인딩 -->
+                    <!-- 실시간 초 단위 시계 바인딩 -->
                     <TextBlock Text="{Binding CurrentTime}" FontWeight="Medium" Margin="0,0,16,0" VerticalAlignment="Center" 
                                Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
 
-                    <!-- ☀️/🌙 라이트/다크 모드 전환 토글 버튼 -->
+                    <!-- ☀️/🌙 라이트/다크 모드 전환 토글 버튼 (툴팁 다국어) -->
                     <ToggleButton Style="{StaticResource MaterialDesignIconButton}"
                                   IsChecked="{Binding IsDarkMode}"
                                   Command="{Binding ToggleThemeCommand}"
-                                  ToolTip="테마 전환 (라이트 / 다크 모드)"
+                                  ToolTip="{DynamicResource Str_ThemeToggleTooltip}"
                                   Margin="0,0,8,0">
                         <materialDesign:PackIcon Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}">
                             <materialDesign:PackIcon.Style>
@@ -81,16 +81,18 @@
                         </materialDesign:PackIcon>
                     </ToggleButton>
 
-                    <!-- 이벤트 로그 버튼 -->
+                    <!-- 이벤트 로그 버튼 (툴팁 다국어) -->
                     <Button Style="{StaticResource MaterialDesignIconButton}" 
-                            ToolTip="이벤트 로그 팝업" 
+                            ToolTip="{DynamicResource Str_DataInquiryTooltip}" 
                             Command="{Binding OpenDataInquiryCommand}"
                             Margin="0,0,4,0">
                         <materialDesign:PackIcon Kind="ViewList" Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
 
-                    <!-- 설정 버튼 -->
-                    <Button Style="{StaticResource MaterialDesignIconButton}" ToolTip="설정">
+                    <!-- ⭐ 설정 버튼 (커맨드 및 툴팁 바인딩 완료) -->
+                    <Button Style="{StaticResource MaterialDesignIconButton}" 
+                            ToolTip="{DynamicResource Str_SettingsTooltip}"
+                            Command="{Binding OpenSettingsCommand}">
                         <materialDesign:PackIcon Kind="Cog" Width="20" Height="20" Foreground="{DynamicResource MaterialDesignBody}"/>
                     </Button>
                 </StackPanel>
@@ -142,24 +144,20 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- C 드라이브 -->
+                        <!-- C 드라이브 (다국어 헤더) -->
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="C 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Text="{DynamicResource Str_CDriveUsage}" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource MaterialDesignBody}"/>
-                            <!-- ⭐ 실시간 C 드라이브 사용률 프로그레스바 -->
                             <ProgressBar Value="{Binding CDriveUsagePercent}" Height="6" Margin="0,4,0,0" Foreground="{DynamicResource PrimaryHueMidBrush}"/>
-                            <!-- ⭐ 실시간 C 드라이브 용량 텍스트 -->
                             <TextBlock Text="{Binding CDriveStatusText}" FontSize="10" Margin="0,2,0,0" 
                                        Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
 
-                        <!-- D 드라이브 -->
+                        <!-- D 드라이브 (다국어 헤더) -->
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="D 드라이브 사용량" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Text="{DynamicResource Str_DDriveUsage}" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource MaterialDesignBody}"/>
-                            <!-- ⭐ 실시간 D 드라이브 사용률 프로그레스바 -->
                             <ProgressBar Value="{Binding DDriveUsagePercent}" Height="6" Margin="0,4,0,0" Foreground="#4CAF50"/>
-                            <!-- ⭐ 실시간 D 드라이브 용량 텍스트 -->
                             <TextBlock Text="{Binding DDriveStatusText}" FontSize="10" Margin="0,2,0,0" 
                                        Foreground="{DynamicResource MaterialDesignBody}" Opacity="0.7"/>
                         </StackPanel>
@@ -167,7 +165,7 @@
 
                     <Separator Grid.Row="1" Margin="0,0,0,8"/>
 
-                    <!-- 2. 실시간 이벤트 데이터 로그 그리드 -->
+                    <!-- 2. 실시간 이벤트 데이터 로그 그리드 (다국어 헤더 & Line 바인딩) -->
                     <DataGrid Grid.Row="2" 
                               Style="{StaticResource MaterialDesignDataGrid}"
                               ItemsSource="{Binding EventLogList}" 
@@ -190,33 +188,31 @@
                         </DataGrid.ColumnHeaderStyle>
 
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Line" Width="60" Binding="{Binding Row}"/>
-                            <DataGridTextColumn Header="BAY" Width="60" Binding="{Binding Bay}"/>
-                            <DataGridTextColumn Header="LEVEL" Width="60" Binding="{Binding Level}"/>
-                            <DataGridTextColumn Header="CONTENT" Width="*" Binding="{Binding Content}"/>
-                            <DataGridTextColumn Header="DATETIME" Width="80" Binding="{Binding DateTime}"/>
+                            <!-- ViewModel 프로퍼티(Line)와 일치하도록 Binding 교체 및 다국어 헤더 적용 -->
+                            <DataGridTextColumn Header="{DynamicResource Str_ColLine}" Width="60" Binding="{Binding Line}"/>
+                            <DataGridTextColumn Header="{DynamicResource Str_ColBay}" Width="60" Binding="{Binding Bay}"/>
+                            <DataGridTextColumn Header="{DynamicResource Str_ColLevel}" Width="60" Binding="{Binding Level}"/>
+                            <DataGridTextColumn Header="{DynamicResource Str_ColContent}" Width="*" Binding="{Binding Content}"/>
+                            <DataGridTextColumn Header="{DynamicResource Str_ColDateTime}" Width="80" Binding="{Binding DateTime}"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
             </materialDesign:Card>
         </Grid>
 
-        <!-- ⭐ 화재 알림 팝업 오버레이 레이어 -->
+        <!-- 화재 알림 팝업 오버레이 레이어 -->
         <ItemsControl ItemsSource="{Binding ActiveAlarms}"
                       HorizontalAlignment="Center"
                       VerticalAlignment="Center"
                       Margin="0,20,0,0"
                       Panel.ZIndex="999"
                       Grid.RowSpan="2">
-
-            <!-- 세로로 쌓이도록 패널 설정 -->
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel IsItemsHost="True"/>
                 </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
 
-            <!-- 팝업 목록 항목 템플릿 (Window.Resources에 등록된 DataTemplate 자동 매핑) -->
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
                     <ContentPresenter Content="{Binding}" Margin="0,0,0,10"/>

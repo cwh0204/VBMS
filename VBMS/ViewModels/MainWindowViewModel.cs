@@ -16,6 +16,7 @@ using VBMS.Repositories;
 using VBMS.Services.Communications;
 using VBMS.Services.Evaluators;
 using VBMS.Services.Orchestrators;
+using VBMS.Services.Settings;
 using VBMS.Services.Theme;
 using VBMS.Views;
 
@@ -27,6 +28,7 @@ namespace VBMS.ViewModels
         private readonly IFdsMappingService? _mappingService;
         private readonly IFireSignalEvaluator? _fireSignalEvaluator;
         private readonly IDetectorRepository? _repository;
+        private readonly ISettingsService? _settingsService;
 
         // UI 보드 수신 시각 및 위치 추적용
         private readonly ConcurrentDictionary<string, DateTime> _boardLastSeen = new();
@@ -118,12 +120,14 @@ namespace VBMS.ViewModels
             IFdsDataOrchestrator orchestrator,
             IFdsMappingService mappingService,
             IFireSignalEvaluator fireSignalEvaluator,
-            IDetectorRepository repository) : this()
+            IDetectorRepository repository,
+            ISettingsService settingsService) : this()
         {
             _orchestrator = orchestrator ?? throw new ArgumentNullException(nameof(orchestrator));
             _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
             _fireSignalEvaluator = fireSignalEvaluator ?? throw new ArgumentNullException(nameof(fireSignalEvaluator));
             _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+            _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
 
             _orchestrator.OnPacketProcessed += HandlePacketProcessed;
 
@@ -135,7 +139,9 @@ namespace VBMS.ViewModels
             {
                 try
                 {
-                    await _orchestrator.StartServerAsync(5000);
+                    // 설정 파일에 지정된 포트로 서버 구동 (기본값: 5000)
+                    int port = _settingsService?.CurrentSettings.ServerPort ?? 5000;
+                    await _orchestrator.StartServerAsync(port);
                 }
                 catch (Exception ex)
                 {
@@ -196,7 +202,6 @@ namespace VBMS.ViewModels
             RackList.Add(new RackViewModel("Line 1", 70, 13, 25.4));
             RackList.Add(new RackViewModel("Line 2", 54, 13, 25.5));
 
-            // ⭐ Line 프로퍼티 적용
             EventLogList.Add(new EventLogModel
             {
                 Line = 1,
@@ -282,13 +287,11 @@ namespace VBMS.ViewModels
                 {
                     case 2:
                         AddEventLog(lane, bay, level, $"[화재 감지] 고온 경보 발생! (센서 #{detector.Index}, 온도: {detector.Temperature}℃)");
-                        // ⭐ '열' -> 'Line'으로 팝업 텍스트 정정
                         ShowFireNotification("🚨 화재 발생", $"[ {rackName} ]\nLine : {lane}   연 : {bay}   단 : {level}\n온도 : {detector.Temperature}℃");
                         break;
 
                     case 1:
                         AddEventLog(lane, bay, level, $"[연기 감지] 연기 신호 감지 (센서 #{detector.Index})");
-                        // ⭐ '열' -> 'Line'으로 팝업 텍스트 정정
                         ShowFireNotification("⚠️ 연기 감지", $"[ {rackName} ]\nLine : {lane}   연 : {bay}   단 : {level}");
                         break;
 
@@ -329,21 +332,22 @@ namespace VBMS.ViewModels
             if (_mappingService == null) return;
 
             DateTime now = DateTime.Now;
+            // 설정 파일의 타임아웃 기준 시간 적용 (기본값: 5초)
+            int timeoutLimitSeconds = _settingsService?.CurrentSettings.BoardTimeoutSeconds ?? 5;
 
             foreach (var kvp in _boardLastSeen)
             {
                 string boardId = kvp.Key;
                 DateTime lastSeen = kvp.Value;
 
-                if ((now - lastSeen).TotalSeconds > 5)
+                if ((now - lastSeen).TotalSeconds > timeoutLimitSeconds)
                 {
                     if (_mappingService.TryGetBoardMapping(boardId, 16, out int lane, out int bayOffset, out int targetBay, out int targetLevel))
                     {
                         if (!_boardTimeoutState.ContainsKey(boardId))
                         {
                             _boardTimeoutState[boardId] = true;
-                            // ⭐ 보드 전체 통신 두절이므로 단(Level)을 0으로 통일
-                            AddEventLog(lane, bayOffset + 1, 0, $"[통신 오류] 보드 #{boardId} 신호 수신 중단 (5초 초과)");
+                            AddEventLog(lane, bayOffset + 1, 0, $"[통신 오류] 보드 #{boardId} 신호 수신 중단 ({timeoutLimitSeconds}초 초과)");
                         }
 
                         Application.Current?.Dispatcher.InvokeAsync(() =>
@@ -380,7 +384,24 @@ namespace VBMS.ViewModels
             dataInquiryWindow.Show();
         }
 
-        // ⭐ 파라미터 이름을 row -> line으로 변경
+        /// <summary>
+        /// 상단 설정(Cog) 버튼 클릭 시 환경 설정 모달 창을 엽니다.
+        /// </summary>
+        [RelayCommand]
+        private void OpenSettings()
+        {
+            var viewModel = App.Services.GetService<SettingsViewModel>();
+            if (viewModel == null) return;
+
+            var settingsWindow = new SettingsWindow
+            {
+                DataContext = viewModel,
+                Owner = Application.Current.MainWindow
+            };
+
+            settingsWindow.ShowDialog();
+        }
+
         private void AddEventLog(int line, int bay, int level, string content)
         {
             DateTime now = DateTime.Now;
@@ -397,7 +418,9 @@ namespace VBMS.ViewModels
                     DateTime = now
                 });
 
-                if (EventLogList.Count > 200)
+                // 설정 파일에 지정된 실시간 로그 최대 보관 개수 적용 (기본값: 200개)
+                int maxCapacity = _settingsService?.CurrentSettings.MaxEventLogCount ?? 200;
+                if (EventLogList.Count > maxCapacity)
                 {
                     EventLogList.RemoveAt(EventLogList.Count - 1);
                 }
@@ -414,7 +437,6 @@ namespace VBMS.ViewModels
                 try
                 {
                     Debug.WriteLine($"[DB TRY] DB 저장 시도 중... ({content})");
-                    // ⭐ DB 저장소 메서드에 line 전달
                     await _repository.SaveEventLogAsync(line, bay, level, content, now).ConfigureAwait(false);
                     Debug.WriteLine($"✅ [DB SUCCESS] DB 저장 완료: {content}\n");
                 }

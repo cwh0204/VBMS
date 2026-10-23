@@ -1,35 +1,39 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using VBMS.Enums;
 
 namespace VBMS.Services.Evaluators
 {
     public class FireSignalEvaluator : IFireSignalEvaluator
     {
-        private readonly double _highTempThreshold;    // 화재 임계치 (기본 60.0℃)
-        private readonly double _warningTempThreshold; // 주의 임계치 (기본 45.0℃)
-        private readonly double _deltaTempThreshold;   // 평균 대비 편차 임계치 (기본 10.0℃)
+        // ⭐ 인터페이스 멤버 구현 (get 프로퍼티)
+        public double HighTempThreshold { get; private set; }
+        public double WarningTempThreshold { get; private set; }
+        public double DeltaTempThreshold { get; private set; }
 
-        // ⭐ 생성자에서 3가지 임계치를 받고 기본값을 제공하도록 수정
         public FireSignalEvaluator(
             double highTempThreshold = 60.0,
             double warningTempThreshold = 45.0,
             double deltaTempThreshold = 10.0)
         {
-            _highTempThreshold = highTempThreshold;
-            _warningTempThreshold = warningTempThreshold;
-            _deltaTempThreshold = deltaTempThreshold;
+            HighTempThreshold = highTempThreshold;
+            WarningTempThreshold = warningTempThreshold;
+            DeltaTempThreshold = deltaTempThreshold;
+        }
+
+        // ⭐ 설정창에서 실시간으로 임계치를 변경할 때 호출되는 메서드
+        public void UpdateThresholds(double highTemp, double warningTemp, double deltaTemp)
+        {
+            HighTempThreshold = highTemp;
+            WarningTempThreshold = warningTemp;
+            DeltaTempThreshold = deltaTemp;
         }
 
         public byte Evaluate(int rawStatus, double temperature)
         {
             // 1. 고온 감지 우선 판정 (임계치 이상)
-            if (temperature >= _highTempThreshold)
+            if (temperature >= HighTempThreshold)
             {
-                return 2; // 온도감지
+                return 2; // 온도감지 (화재)
             }
 
             // 2. 연기 감지 판정
@@ -44,20 +48,20 @@ namespace VBMS.Services.Evaluators
 
         public AnomalyStatus EvaluateAnomaly(int rawStatus, double temperature, double rackAvgTemperature)
         {
-            // 1. 고온 화재 감지 (60℃ 이상)
-            if (temperature >= _highTempThreshold)
+            // 1. 고온 화재 감지
+            if (temperature >= HighTempThreshold)
                 return AnomalyStatus.HighTempAlarm;
 
             // 2. 연기 화재 감지
             if (rawStatus == 1)
                 return AnomalyStatus.SmokeAlarm;
 
-            // 3. ⚠️ 평균 대비 편차 이상 감지 (예: 랙 평균 25℃인데 해당 센서가 35℃ 이상일 때)
-            if (rackAvgTemperature > 0 && (temperature - rackAvgTemperature) >= _deltaTempThreshold)
+            // 3. 평균 대비 편차 이상 감지
+            if (rackAvgTemperature > 0 && (temperature - rackAvgTemperature) >= DeltaTempThreshold)
                 return AnomalyStatus.DeltaTempWarning;
 
-            // 4. ⚠️ 절대 주의 온도 도달 (예: 45℃ 이상 60℃ 미만)
-            if (temperature >= _warningTempThreshold)
+            // 4. 절대 주의 온도 도달
+            if (temperature >= WarningTempThreshold)
                 return AnomalyStatus.AbsoluteTempWarning;
 
             // 5. 정상

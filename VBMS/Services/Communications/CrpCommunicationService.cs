@@ -159,6 +159,7 @@ namespace VBMS.Services.Communications
                             // 처리할 패킷 구간을 버퍼에서 즉시 제거
                             rxBuffer.Remove(0, endIndex + 1);
 
+                            Debug.WriteLine($"[전문 원본]: {fullPacket}");
                             // 패킷 해석 처리
                             CrpPacket? packet = _crpDataParser.Parse(fullPacket);
                             Log($"[{clientEndpoint}] {fullPacket}", "RX");

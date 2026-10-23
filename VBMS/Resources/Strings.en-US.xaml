@@ -1,0 +1,105 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=mscorlib">
+
+	<!-- 시스템 기본 & 헤더 -->
+	<system:String x:Key="Str_AppTitle">VBMS - Battery Rack Integrated Monitoring System</system:String>
+	<system:String x:Key="Str_AppSubTitle">|   Battery Rack Real-Time Fire &amp; Safety Monitoring System</system:String>
+	<system:String x:Key="Str_ThemeToggleTooltip">Toggle Theme (Light / Dark Mode)</system:String>
+	<system:String x:Key="Str_DataInquiryTooltip">Event Log Inquiry</system:String>
+	<system:String x:Key="Str_SettingsTooltip">Settings</system:String>
+
+	<!-- 드라이브 및 대시보드 -->
+	<system:String x:Key="Str_CDriveUsage">Drive C Usage</system:String>
+	<system:String x:Key="Str_DDriveUsage">Drive D Usage</system:String>
+	<system:String x:Key="Str_DriveChecking">Checking capacity...</system:String>
+	<system:String x:Key="Str_DriveReadyFail">Drive not ready</system:String>
+
+	<!-- 설비/센서 상태 텍스트 -->
+	<system:String x:Key="Str_StatusStandby">Standby</system:String>
+	<system:String x:Key="Str_StatusNormal">Normal</system:String>
+	<system:String x:Key="Str_StatusCommError">Comm Error</system:String>
+	<system:String x:Key="Str_StatusSmoke">Smoke Detected</system:String>
+	<system:String x:Key="Str_StatusFire">Fire Alarm</system:String>
+	<system:String x:Key="Str_StatusDisabled">Disabled</system:String>
+	<system:String x:Key="Str_StatusUnconnected">Offline</system:String>
+
+	<!-- 랙 및 셀 단위 -->
+	<system:String x:Key="Str_UnitLine">Line</system:String>
+	<system:String x:Key="Str_UnitBay">Bay</system:String>
+	<system:String x:Key="Str_UnitLevel">Level</system:String>
+	<system:String x:Key="Str_SnapJump">Quick Bay Snap</system:String>
+	<system:String x:Key="Str_ResetDetector">Reset Detector</system:String>
+	<system:String x:Key="Str_CellSummary">Cell Status Summary</system:String>
+	<system:String x:Key="Str_SelectedNodeDiag">Selected Node Diagnosis</system:String>
+	<system:String x:Key="Str_StatusLegend">Status Legend</system:String>
+
+	<!-- 데이터 그리드 컬럼 -->
+	<system:String x:Key="Str_ColLine">LINE</system:String>
+	<system:String x:Key="Str_ColBay">BAY</system:String>
+	<system:String x:Key="Str_ColLevel">LEVEL</system:String>
+	<system:String x:Key="Str_ColContent">CONTENT</system:String>
+	<system:String x:Key="Str_ColDateTime">DATETIME</system:String>
+
+	<!-- 설정창 (Settings Window) -->
+	<system:String x:Key="Str_SettingsTitle">System Settings</system:String>
+	<system:String x:Key="Str_TabGeneral">General</system:String>
+	<system:String x:Key="Str_TabSafety">Safety/Thresholds</system:String>
+	<system:String x:Key="Str_TabNetwork">Network</system:String>
+	<system:String x:Key="Str_TabStorage">Storage</system:String>
+
+	<system:String x:Key="Str_SettingLanguage">System Language</system:String>
+	<system:String x:Key="Str_SettingTheme">Default Theme</system:String>
+	<system:String x:Key="Str_ThemeDark">Dark Mode</system:String>
+	<system:String x:Key="Str_ThemeLight">Light Mode</system:String>
+
+	<system:String x:Key="Str_SettingHighTemp">High Temperature Threshold</system:String>
+	<system:String x:Key="Str_SettingWarningTemp">Warning Threshold</system:String>
+	<system:String x:Key="Str_SettingDeltaTemp">Deviation (Delta) Threshold</system:String>
+	<system:String x:Key="Str_SettingServerPort">CRP TCP Server Port</system:String>
+	<system:String x:Key="Str_SettingTimeout">Board Timeout Duration</system:String>
+	<system:String x:Key="Str_SettingExportDir">Data &amp; Excel Export Directory</system:String>
+	<system:String x:Key="Str_SettingLogCapacity">Max Real-Time Log Count</system:String>
+	<system:String x:Key="Str_BtnBrowse">Browse...</system:String>
+	<system:String x:Key="Str_BtnSave">Save</system:String>
+	<system:String x:Key="Str_BtnCancel">Cancel</system:String>
+
+	<!-- 데이터 조회창 (Data Inquiry Window) -->
+	<system:String x:Key="Str_DataInquiryTitle">Statistics &amp; History Inquiry (DATA INQUIRY)</system:String>
+	<system:String x:Key="Str_InquiryPeriod">Search Period</system:String>
+	<system:String x:Key="Str_SearchAll">Search All</system:String>
+	<system:String x:Key="Str_SectionSummaryChart">1. Sensor Monitoring &amp; Trend Analysis (Summary Logs)</system:String>
+	<system:String x:Key="Str_SectionEventLogs">2. Event &amp; Alarm History (Event Logs)</system:String>
+	<system:String x:Key="Str_SectionDumpLogs">3. Anomaly Diagnostic Dump Logs (Detector Dump Logs)</system:String>
+	<system:String x:Key="Str_DateLabel">Date</system:String>
+	<system:String x:Key="Str_BtnSearch">Search</system:String>
+	<system:String x:Key="Str_BtnExportExcel">Export Excel</system:String>
+
+	<system:String x:Key="Str_ColOccurTime">Timestamp</system:String>
+	<system:String x:Key="Str_ColReceiveTime">Received Time</system:String>
+	<system:String x:Key="Str_ColTempWithUnit">Temp(°C)</system:String>
+	<system:String x:Key="Str_ColFireStatus">Fire</system:String>
+	<system:String x:Key="Str_ColErrorStatus">Error</system:String>
+
+	<!-- 차트 다국어 -->
+	<system:String x:Key="Str_ChartAvgTemp">Avg Temp (°C)</system:String>
+	<system:String x:Key="Str_ChartMaxTemp">Max Temp (°C)</system:String>
+	<system:String x:Key="Str_ChartTimeAxis">Timestamp</system:String>
+	<system:String x:Key="Str_ChartTempAxis">Temperature (°C)</system:String>
+
+	<!-- 엑셀 및 조회 알림 -->
+	<system:String x:Key="Str_NoDataToExport">No data available to export.</system:String>
+	<system:String x:Key="Str_ExportSuccess">Excel export completed successfully.</system:String>
+	<system:String x:Key="Str_ExportFail">An error occurred during Excel export: </system:String>
+
+	<!-- 화재/연기 알림 팝업 (Fire Alarm Popup) -->
+	<system:String x:Key="Str_BtnConfirm">OK</system:String>
+	<system:String x:Key="Str_PopupFireTitle">🚨 Fire Alarm</system:String>
+	<system:String x:Key="Str_PopupSmokeTitle">⚠️ Smoke Detected</system:String>
+	<system:String x:Key="Str_PopupTempLabel">Temp</system:String>
+	<system:String x:Key="Str_PopupCloseTooltip">Close Notification</system:String>
+
+	<!-- 공통 알림 메시지 -->
+	<system:String x:Key="Str_MsgSaved">Settings have been saved successfully.</system:String>
+	<system:String x:Key="Str_MsgPortRestartNotice">(Network port changes will take effect after restarting the application.)</system:String>
+</ResourceDictionary>

@@ -31,20 +31,21 @@
                     CornerRadius="10,10,0,0"
                     Padding="14,10">
                 <Grid>
-                    <!-- 좌측: 불꽃 아이콘 + 타이틀 -->
+                    <!-- 좌측: 불꽃 아이콘 + 타이틀 (ViewModel에서 다국어 타이틀 바인딩) -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
                         <materialDesign:PackIcon Kind="Fire" Width="20" Height="20" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="{Binding Title, FallbackValue='연기 감지'}" 
+                        <TextBlock Text="{Binding Title, FallbackValue='🚨 화재/연기 경보'}" 
                                    Foreground="White" 
                                    FontWeight="Bold" 
                                    FontSize="15" 
                                    VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- 우측: [X] 닫기 버튼 -->
+                    <!-- 우측: [X] 닫기 버튼 (다국어 툴팁 적용) -->
                     <Button HorizontalAlignment="Right" VerticalAlignment="Center"
                             Command="{Binding CloseCommand}"
                             Style="{StaticResource MaterialDesignFlatButton}"
+                            ToolTip="{DynamicResource Str_PopupCloseTooltip}"
                             Width="26" Height="26" Padding="0"
                             Foreground="White" Opacity="0.9">
                         <materialDesign:PackIcon Kind="Close" Width="18" Height="18"/>
@@ -76,7 +77,7 @@
                 </Border>
             </Border>
 
-            <!-- 3. 하단 버튼 영역 -->
+            <!-- 3. 하단 버튼 영역 (다국어 '확인/OK' 버튼 적용) -->
             <Border Grid.Row="2" 
                     Background="#F5F5F5" 
                     CornerRadius="0,0,10,10"
@@ -92,7 +93,7 @@
                         materialDesign:ButtonAssist.CornerRadius="6">
                     <StackPanel Orientation="Horizontal">
                         <materialDesign:PackIcon Kind="Check" Width="16" Height="16" Margin="0,0,4,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="확인" VerticalAlignment="Center"/>
+                        <TextBlock Text="{DynamicResource Str_BtnConfirm}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </Border>
